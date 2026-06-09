@@ -1,0 +1,17 @@
+# Standalone workspace: this guest builds for `wasm32-unknown-unknown`, so it is
+# kept out of the host crate's build graph (the empty `[workspace]` table makes
+# this its own workspace root with a separate Cargo.lock).
+[package]
+name = "score"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+# A reactor-style component: no `_start`, exports only.
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.46"
+
+[workspace]

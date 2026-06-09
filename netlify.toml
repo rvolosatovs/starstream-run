@@ -1,0 +1,19 @@
+[build]
+  # Build the web crate to wasm32-unknown-unknown, run wasm-bindgen, build the
+  # bundled `score.wasm` example contract, then assemble the publish dir: the
+  # static `crates/web/web/` page plus the generated `pkg/` (wasm-bindgen glue)
+  # and `score.wasm`. wasm-bindgen-cli is pinned to the same version as the
+  # `wasm-bindgen` dependency in Cargo.lock so the generated JS matches the ABI.
+  command = """
+    rustup target add wasm32-unknown-unknown && \
+    cargo install wasm-bindgen-cli --version 0.2.105 --locked && \
+    cargo build -p starstream-run-web --release --target wasm32-unknown-unknown && \
+    wasm-bindgen --target web --out-dir crates/web/web/pkg \
+      target/wasm32-unknown-unknown/release/starstream_run_web.wasm && \
+    cargo build --release --target wasm32-unknown-unknown \
+      --manifest-path crates/cli/tests/score/Cargo.toml && \
+    cp crates/cli/tests/score/target/wasm32-unknown-unknown/release/score.wasm \
+      crates/web/web/score.wasm && \
+    rm -rf dist && cp -r crates/web/web dist
+  """
+  publish = "dist"

@@ -1,0 +1,18 @@
+[package]
+name = "starstream-run-web"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+console_error_panic_hook = { workspace = true }
+cranelift-codegen = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+starstream-run = { workspace = true, features = ["wasmtime-custom-virtual-memory"] }
+tracing = { workspace = true, features = ["std"] }
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
+wasm-bindgen = { workspace = true, features = ["std"] }
+wasmtime = { workspace = true, features = ["component-model", "runtime"] }
+web-sys = { workspace = true, features = ["console", "Window", "Document", "Element", "Node"] }

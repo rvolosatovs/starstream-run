@@ -1,0 +1,29 @@
+package root:component;
+
+interface score {
+    finish: func(x: u64);
+}
+
+interface score-progress {
+    record storage {
+      chips: u64,
+      mult: u64,
+    }
+
+    get-storage: func(utxo: borrow<utxo>) -> storage;
+    set-storage: func(utxo: borrow<utxo>, storage: storage);
+
+    resource utxo {
+        new: static func() -> utxo;
+
+        plus-chips: func(chips2: u64);
+        plus-mult: func(mult2: u64);
+        mult-mult: func(mult-pct: u64);
+        finish: func();
+    }
+}
+
+world root {
+    import score;
+    export score-progress;
+}

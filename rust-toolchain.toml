@@ -1,0 +1,7 @@
+[toolchain]
+# This workspace is edition 2024, which requires Rust >= 1.85. Pinning stable
+# (plus the wasm32-unknown-unknown target the web crate and `score` guest build
+# against) keeps the Netlify build reproducible regardless of the build image's
+# default toolchain.
+channel = "stable"
+targets = ["wasm32-unknown-unknown"]

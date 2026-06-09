@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>starstream-run</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #e4e4e7;
+        --bg: #18181b;
+        --muted: #a1a1aa;
+        --accent: #818cf8;
+        --ok: #4ade80;
+        --err: #f87171;
+        --panel: #27272a;
+        --warn: #fbbf24;
+        --info: #60a5fa;
+        --debug: #a1a1aa;
+        --trace: #71717a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font: 15px/1.5 system-ui, sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+        display: flex;
+        justify-content: center;
+        padding: 2rem 1rem;
+      }
+      main { width: 100%; max-width: 720px; }
+      h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+      p.lead { color: var(--muted); margin: 0 0 1.5rem; }
+      .drop {
+        display: block;
+        border: 2px dashed #3f3f46;
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+        transition: border-color 0.15s, background 0.15s;
+        cursor: pointer;
+      }
+      .drop.over { border-color: var(--accent); background: #1e1b4b33; }
+      .drop input { display: none; }
+      .drop strong { color: var(--accent); }
+      button {
+        margin-top: 1rem;
+        font: inherit;
+        font-weight: 600;
+        color: var(--bg);
+        background: var(--accent);
+        border: 0;
+        border-radius: 8px;
+        padding: 0.6rem 1.2rem;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .status { margin-top: 1.25rem; min-height: 1.5rem; }
+      .status.ok { color: var(--ok); }
+      .status.err { color: var(--err); }
+      pre {
+        background: var(--panel);
+        border-radius: 8px;
+        padding: 1rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0.5rem 0 0;
+      }
+      footer { margin-top: 2rem; color: var(--muted); font-size: 0.85rem; }
+      code { background: var(--panel); padding: 0.1rem 0.35rem; border-radius: 4px; }
+      #log {
+        background: var(--panel);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        margin: 0.75rem 0 0;
+        max-height: 22rem;
+        overflow: auto;
+        font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      #log:empty::before {
+        content: "No log output yet.";
+        color: var(--muted);
+        font-style: italic;
+      }
+      .log-line { color: var(--fg); }
+      .log-error { color: var(--err); }
+      .log-warn { color: var(--warn); }
+      .log-info { color: var(--info); }
+      .log-debug { color: var(--debug); }
+      .log-trace { color: var(--trace); }
+
+      /* Interactive contract surface */
+      #contract { margin-top: 1.5rem; }
+      #contract:empty { display: none; }
+      .instance {
+        border: 1px solid #3f3f46;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        margin-top: 1rem;
+      }
+      .instance > h2 {
+        font-size: 1rem;
+        margin: 0 0 0.25rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: var(--accent);
+        word-break: break-all;
+      }
+      .resource { margin-top: 1rem; }
+      .resource > h3 {
+        font-size: 0.95rem;
+        margin: 0 0 0.5rem;
+        padding-bottom: 0.35rem;
+        border-bottom: 1px solid #3f3f46;
+      }
+      .resource > h3 .kw { color: var(--muted); font-weight: 400; }
+      .subhead {
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin: 0.75rem 0 0.35rem;
+      }
+      .func {
+        background: var(--panel);
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+        margin: 0.4rem 0;
+      }
+      .func-head {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .func-name {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 600;
+      }
+      .func button { margin: 0; padding: 0.35rem 0.8rem; font-size: 0.85rem; border-radius: 6px; }
+      .params { display: grid; gap: 0.4rem; margin: 0.5rem 0 0; }
+      .params:empty { display: none; }
+      .field { display: flex; flex-direction: column; gap: 0.2rem; }
+      .field > label { font-size: 0.8rem; color: var(--muted); }
+      .field-row { display: flex; align-items: center; gap: 0.4rem; }
+      .params input[type="text"],
+      .params input[type="number"],
+      .params select,
+      .params textarea {
+        font: inherit;
+        font-size: 0.85rem;
+        color: var(--fg);
+        background: var(--bg);
+        border: 1px solid #3f3f46;
+        border-radius: 6px;
+        padding: 0.3rem 0.45rem;
+        width: 100%;
+      }
+      .params textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 3rem; }
+      fieldset.nested {
+        border: 1px solid #3f3f46;
+        border-radius: 6px;
+        padding: 0.4rem 0.6rem 0.6rem;
+        margin: 0;
+      }
+      fieldset.nested > legend { font-size: 0.78rem; color: var(--muted); padding: 0 0.3rem; }
+      .result {
+        margin: 0.5rem 0 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .result.err { color: var(--err); }
+      .result.ok { color: var(--ok); }
+      .handles:empty::before {
+        content: "None yet — call a constructor above.";
+        color: var(--muted);
+        font-style: italic;
+        font-size: 0.85rem;
+      }
+      .handle {
+        border: 1px solid #3f3f46;
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+        margin: 0.5rem 0;
+      }
+      .handle-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-bottom: 0.4rem;
+      }
+      .handle-title { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--info); }
+      .handle button.drop-btn {
+        background: transparent;
+        color: var(--err);
+        border: 1px solid var(--err);
+        padding: 0.2rem 0.6rem;
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>starstream-run</h1>
+      <p class="lead">
+        Load, link and instantiate a Starstream contract in the browser — run
+        entirely client-side via wasmtime's Pulley interpreter.
+      </p>
+
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".wasm,application/wasm" />
+        <div>Drop a <strong>.wasm</strong> file here, or click to choose one</div>
+        <div id="filename" style="color: var(--muted); margin-top: 0.5rem"></div>
+      </label>
+      <p style="color: var(--muted); margin: 0.75rem 0 0; font-size: 0.85rem">
+        Defaults to the bundled <code>score.wasm</code> example contract.
+      </p>
+
+      <div>
+        <button id="run" disabled>Load &amp; inspect</button>
+      </div>
+
+      <div class="status" id="status">Loading runtime…</div>
+      <pre id="output" hidden></pre>
+
+      <div id="contract"></div>
+
+      <h2 style="font-size: 1rem; margin: 1.5rem 0 0.25rem">Log</h2>
+      <div id="log"></div>
+
+      <footer>
+        Accepts a full component or a core module with a <code>component-type</code>
+        custom section. After instantiation, every exported instance that owns a
+        resource is listed below: call a constructor (e.g. <code>new</code>) to
+        mint a handle, then invoke its methods. Detailed trace logs appear in the
+        panel above.
+      </footer>
+    </main>
+
+    <script type="module">
+      import init, { instantiate } from "./pkg/starstream_run_web.js";
+
+      const fileInput = document.getElementById("file");
+      const drop = document.getElementById("drop");
+      const filename = document.getElementById("filename");
+      const runBtn = document.getElementById("run");
+      const status = document.getElementById("status");
+      const output = document.getElementById("output");
+      const log = document.getElementById("log");
+      const contractEl = document.getElementById("contract");
+
+      function clearLog() {
+        log.textContent = "";
+      }
+
+      let bytes = null;
+      // The live, instantiated contract (a wasm-bindgen `Contract`), or null.
+      let contract = null;
+
+      function setStatus(text, kind = "") {
+        status.textContent = text;
+        status.className = "status" + (kind ? " " + kind : "");
+      }
+
+      function showOutput(text) {
+        if (text) {
+          output.textContent = text;
+          output.hidden = false;
+        } else {
+          output.hidden = true;
+        }
+      }
+
+      function setComponent(name, data) {
+        bytes = data;
+        filename.textContent = `${name} (${data.length.toLocaleString()} bytes)`;
+        runBtn.disabled = false;
+        showOutput(null);
+        contractEl.replaceChildren();
+        contract = null;
+      }
+
+      async function loadFile(file) {
+        if (!file) return;
+        setComponent(file.name, new Uint8Array(await file.arrayBuffer()));
+        setStatus("Ready to load.");
+      }
+
+      // Fetch the bundled example so the page is usable without an upload.
+      async function loadDefault() {
+        const res = await fetch("./score.wasm");
+        if (!res.ok) throw new Error(`HTTP ${res.status} fetching score.wasm`);
+        setComponent("score.wasm", new Uint8Array(await res.arrayBuffer()));
+      }
+
+      fileInput.addEventListener("change", (e) => loadFile(e.target.files[0]));
+
+      drop.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        drop.classList.add("over");
+      });
+      drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+      drop.addEventListener("drop", (e) => {
+        e.preventDefault();
+        drop.classList.remove("over");
+        loadFile(e.dataTransfer.files[0]);
+      });
+
+      const el = (tag, props = {}, children = []) => {
+        const node = Object.assign(document.createElement(tag), props);
+        for (const c of children) node.append(c);
+        return node;
+      };
+
+      // ----- Input widgets, built from a simplified `kind` string ----------
+      // Each builder returns { node, read() } where read() yields the JSON
+      // value to send (or throws on invalid input). The runtime exposes only a
+      // scalar `kind` per parameter; anything non-scalar arrives as "json" and
+      // is entered as raw JSON, lowered to the right type host-side.
+
+      const INT_KINDS = ["u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64"];
+
+      function buildInput(kind) {
+        if (kind === "bool") {
+          const node = el("input", { type: "checkbox" });
+          return { node, read: () => node.checked };
+        }
+        if (INT_KINDS.includes(kind)) {
+          const node = el("input", { type: "number", step: "1", placeholder: kind });
+          return {
+            node,
+            read: () => {
+              if (node.value.trim() === "") throw new Error("missing integer");
+              return Number(node.value);
+            },
+          };
+        }
+        if (kind === "f32" || kind === "f64") {
+          const node = el("input", { type: "number", step: "any", placeholder: kind });
+          return {
+            node,
+            read: () => {
+              if (node.value.trim() === "") throw new Error("missing number");
+              return Number(node.value);
+            },
+          };
+        }
+        if (kind === "char") {
+          const node = el("input", { type: "text", maxLength: 1, placeholder: "char" });
+          return { node, read: () => node.value };
+        }
+        if (kind === "string") {
+          const node = el("input", { type: "text", placeholder: "string" });
+          return { node, read: () => node.value };
+        }
+        // Fallback ("json"): raw JSON entry for records, tuples, lists, etc.
+        const node = el("textarea", { placeholder: "JSON value" });
+        return {
+          node,
+          read: () => {
+            if (node.value.trim() === "") throw new Error("missing JSON value");
+            return JSON.parse(node.value);
+          },
+        };
+      }
+
+      // Recursively collect resource handle ids embedded in a result value.
+      function collectHandles(value, out) {
+        if (Array.isArray(value)) {
+          for (const v of value) collectHandles(v, out);
+        } else if (value && typeof value === "object") {
+          if (typeof value.$handle === "number") out.push(value.$handle);
+          else for (const v of Object.values(value)) collectHandles(v, out);
+        }
+        return out;
+      }
+
+      // Build a row of parameter inputs plus a reader producing the args array.
+      // `prefix` is prepended to every call (used to inject a method's `self`).
+      function buildParams(params, prefix = () => []) {
+        const inputs = params.map((p) => ({ name: p.name, input: buildInput(p.kind) }));
+        const node = el(
+          "div",
+          { className: "params" },
+          inputs.map(({ name, input }) =>
+            el("div", { className: "field" }, [el("label", { textContent: name }), input.node]),
+          ),
+        );
+        return { node, read: () => [...prefix(), ...inputs.map((i) => i.input.read())] };
+      }
+
+      // Render one callable function (constructor or method) as a panel.
+      function renderFunc(instanceName, func, prefix, onResult) {
+        const result = el("div", { className: "result" });
+        const params = buildParams(func.params, prefix);
+        const button = el("button", { type: "button", textContent: "Call" });
+
+        button.addEventListener("click", () => {
+          let args;
+          try {
+            args = params.read();
+          } catch (err) {
+            result.className = "result err";
+            result.textContent = `Invalid input: ${err.message ?? err}`;
+            return;
+          }
+          try {
+            const raw = contract.call(instanceName, func.export, JSON.stringify(args));
+            const results = JSON.parse(raw);
+            result.className = "result ok";
+            result.textContent = results.length ? JSON.stringify(results, null, 2) : "(no return value)";
+            for (const id of collectHandles(results, [])) onResult(id);
+          } catch (err) {
+            result.className = "result err";
+            result.textContent = String(err.message ?? err);
+          }
+        });
+
+        return el("div", { className: "func" }, [
+          el("div", { className: "func-head" }, [el("span", { className: "func-name", textContent: func.label }), button]),
+          params.node,
+          result,
+        ]);
+      }
+
+      // Render the interactive surface for the whole contract.
+      function renderContract(api) {
+        contractEl.replaceChildren();
+
+        const instances = api.instances ?? [];
+        if (!instances.length) {
+          contractEl.append(
+            el("p", { className: "lead", textContent: "Instantiated — but no exported instance owns a `utxo` resource to interact with." }),
+          );
+          return;
+        }
+
+        for (const instance of instances) {
+          const instNode = el("div", { className: "instance" }, [el("h2", { textContent: instance.name })]);
+
+          const resNode = el("div", { className: "resource" });
+          resNode.append(
+            el("h3", {}, [el("span", { className: "kw", textContent: "resource " }), el("span", { textContent: instance.resource })]),
+          );
+
+          // Live handles for this resource, with their method/storage panels.
+          const handlesEl = el("div", { className: "handles" });
+          const addHandle = (id) => {
+            handlesEl.append(renderHandle(instance, id));
+          };
+
+          if (instance.constructors.length) {
+            resNode.append(el("p", { className: "subhead", textContent: "Construct" }));
+            for (const func of instance.constructors) {
+              resNode.append(renderFunc(instance.name, func, () => [], addHandle));
+            }
+          }
+
+          resNode.append(el("p", { className: "subhead", textContent: "Live handles" }));
+          resNode.append(handlesEl);
+          instNode.append(resNode);
+          contractEl.append(instNode);
+        }
+      }
+
+      // Render a single live handle card: one panel per method, plus a storage
+      // section when the resource owns one.
+      function renderHandle(instance, id) {
+        const card = el("div", { className: "handle" });
+        const dropBtn = el("button", { type: "button", className: "drop-btn", textContent: "drop" });
+        card.append(
+          el("div", { className: "handle-head" }, [
+            el("span", { className: "handle-title", textContent: `${instance.resource} #${id}` }),
+            dropBtn,
+          ]),
+        );
+
+        dropBtn.addEventListener("click", () => {
+          try {
+            contract.dropResource(id);
+          } catch (err) {
+            // Surface the failure but still remove the card from the UI.
+            console.warn("dropResource failed", err);
+          }
+          card.remove();
+        });
+
+        const handleRef = () => [{ $handle: id }];
+        if (instance.methods.length) {
+          for (const func of instance.methods) {
+            card.append(renderFunc(instance.name, func, handleRef));
+          }
+        } else {
+          card.append(el("p", { className: "subhead", textContent: "(no methods)" }));
+        }
+
+        if (instance.storage) {
+          card.append(renderStorage(id, instance.storage));
+        }
+        return card;
+      }
+
+      // Render a handle's `storage` panel: a Get button (read) and a Set form
+      // (one scalar input per field).
+      function renderStorage(id, fields) {
+        const result = el("div", { className: "result" });
+
+        const getBtn = el("button", { type: "button", textContent: "Get" });
+        getBtn.addEventListener("click", () => {
+          try {
+            result.className = "result ok";
+            result.textContent = JSON.stringify(JSON.parse(contract.storageGet(id)), null, 2);
+          } catch (err) {
+            result.className = "result err";
+            result.textContent = String(err.message ?? err);
+          }
+        });
+
+        const inputs = fields.map((f) => ({ name: f.name, input: buildInput(f.kind) }));
+        const form = el(
+          "div",
+          { className: "params" },
+          inputs.map(({ name, input }) =>
+            el("div", { className: "field" }, [el("label", { textContent: name }), input.node]),
+          ),
+        );
+        const setBtn = el("button", { type: "button", textContent: "Set" });
+        setBtn.addEventListener("click", () => {
+          let obj;
+          try {
+            obj = Object.fromEntries(inputs.map((i) => [i.name, i.input.read()]));
+          } catch (err) {
+            result.className = "result err";
+            result.textContent = `Invalid input: ${err.message ?? err}`;
+            return;
+          }
+          try {
+            contract.storageSet(id, JSON.stringify(obj));
+            result.className = "result ok";
+            result.textContent = "(storage set)";
+          } catch (err) {
+            result.className = "result err";
+            result.textContent = String(err.message ?? err);
+          }
+        });
+
+        return el("div", { className: "func" }, [
+          el("div", { className: "func-head" }, [el("span", { className: "func-name", textContent: "storage" }), getBtn]),
+          form,
+          el("div", { className: "func-head" }, [setBtn]),
+          result,
+        ]);
+      }
+
+      runBtn.addEventListener("click", () => {
+        if (!bytes) return;
+        setStatus("Instantiating…");
+        showOutput(null);
+        clearLog();
+        contractEl.replaceChildren();
+        // Yield so the status paints before the (synchronous) instantiation.
+        requestAnimationFrame(() => {
+          try {
+            contract = instantiate(bytes);
+            const api = JSON.parse(contract.describe());
+            renderContract(api);
+            setStatus("Instantiated. Interact with the contract below.", "ok");
+          } catch (err) {
+            contract = null;
+            setStatus("Instantiation failed:", "err");
+            showOutput(String(err.message ?? err));
+          }
+        });
+      });
+
+      // `init()` fetches and instantiates the ~11 MB runtime module, then we
+      // preload the bundled example so the page is usable right away.
+      init()
+        .then(loadDefault)
+        .then(() => setStatus("Ready to load score.wasm — or choose another .wasm file."))
+        .catch((err) => {
+          setStatus("Failed to load runtime:", "err");
+          showOutput(String(err));
+        });
+    </script>
+  </body>
+</html>

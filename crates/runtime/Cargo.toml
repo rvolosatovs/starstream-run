@@ -1,0 +1,20 @@
+[package]
+name = "starstream-run"
+version.workspace = true
+edition.workspace = true
+
+[features]
+wasmtime-custom-virtual-memory = ["wasmtime/custom-virtual-memory"]
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
+wasi-preview1-component-adapter-provider = { workspace = true }
+wasmparser = { workspace = true }
+wasmtime = { workspace = true, features = [
+    "anyhow",
+    "component-model",
+    "cranelift",
+    "runtime",
+] }
+wit-component = { workspace = true }

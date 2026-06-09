@@ -1,0 +1,712 @@
+use core::ops::Deref;
+use std::sync::Arc;
+
+use tracing::{debug, error, info, instrument, warn};
+use wasi_preview1_component_adapter_provider::{
+    WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME, WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
+};
+use wasmtime::error::Context as _;
+use wasmtime::{
+    AsContext, AsContextMut, Config, Engine, Store, StoreContext, StoreContextMut, bail,
+};
+use wasmtime::{
+    component::{
+        Component, ComponentExportIndex, HasSelf, Instance, InstancePre, Linker, LinkerInstance,
+        ResourceAny, ResourceType, Type, types,
+    },
+    ensure,
+};
+
+mod bindings {
+    wasmtime::component::bindgen!({
+        inline: "
+            package starstream:host;
+
+            world host {
+                import starstream:std/builtin;
+                import starstream:std/cardano;
+            }
+        ",
+    });
+}
+
+pub struct Ctx;
+
+impl bindings::starstream::std::builtin::Host for Ctx {
+    fn implements_method(&mut self, hash: (u64, u64, u64, u64)) {
+        error!("called builtin#implements_method {hash:?}");
+    }
+}
+
+impl bindings::starstream::std::cardano::Host for Ctx {
+    fn block_height(&mut self) -> i64 {
+        error!("called cardano#block_height");
+        0
+    }
+
+    fn current_slot(&mut self) -> i64 {
+        error!("called cardano#current_slot");
+        0
+    }
+}
+
+pub enum Val {
+    Bool(bool),
+    S8(i8),
+    U8(u8),
+    S16(i16),
+    U16(u16),
+    S32(i32),
+    U32(u32),
+    S64(i64),
+    U64(u64),
+    Char(char),
+    String(String),
+    Record(Vec<(String, Val)>),
+    Tuple(Vec<Val>),
+}
+
+impl From<Val> for wasmtime::component::Val {
+    fn from(v: Val) -> Self {
+        match v {
+            Val::Bool(v) => Self::Bool(v),
+            Val::S8(v) => Self::S8(v),
+            Val::U8(v) => Self::U8(v),
+            Val::S16(v) => Self::S16(v),
+            Val::U16(v) => Self::U16(v),
+            Val::S32(v) => Self::S32(v),
+            Val::U32(v) => Self::U32(v),
+            Val::S64(v) => Self::S64(v),
+            Val::U64(v) => Self::U64(v),
+            Val::Char(v) => Self::Char(v),
+            Val::String(v) => Self::String(v),
+            Val::Record(vs) => Self::Record(vs.into_iter().map(|(k, v)| (k, v.into())).collect()),
+            Val::Tuple(vs) => Self::Tuple(vs.into_iter().map(Into::into).collect()),
+        }
+    }
+}
+
+impl TryFrom<wasmtime::component::Val> for Val {
+    type Error = wasmtime::Error;
+
+    fn try_from(v: wasmtime::component::Val) -> Result<Self, Self::Error> {
+        match v {
+            wasmtime::component::Val::Bool(v) => Ok(Self::Bool(v)),
+            wasmtime::component::Val::S8(v) => Ok(Self::S8(v)),
+            wasmtime::component::Val::U8(v) => Ok(Self::U8(v)),
+            wasmtime::component::Val::S16(v) => Ok(Self::S16(v)),
+            wasmtime::component::Val::U16(v) => Ok(Self::U16(v)),
+            wasmtime::component::Val::S32(v) => Ok(Self::S32(v)),
+            wasmtime::component::Val::U32(v) => Ok(Self::U32(v)),
+            wasmtime::component::Val::S64(v) => Ok(Self::S64(v)),
+            wasmtime::component::Val::U64(v) => Ok(Self::U64(v)),
+            wasmtime::component::Val::Char(v) => Ok(Self::Char(v)),
+            wasmtime::component::Val::String(v) => Ok(Self::String(v)),
+            wasmtime::component::Val::Record(vs) => {
+                let vs = vs
+                    .into_iter()
+                    .map(|(k, v)| {
+                        let v = Self::try_from(v)?;
+                        Ok((k, v))
+                    })
+                    .collect::<wasmtime::Result<_>>()?;
+                Ok(Self::Record(vs))
+            }
+            wasmtime::component::Val::Tuple(vs) => {
+                let vs = vs
+                    .into_iter()
+                    .map(Self::try_from)
+                    .collect::<wasmtime::Result<_>>()?;
+                Ok(Self::Tuple(vs))
+            }
+            _ => bail!("unexpected value type"),
+        }
+    }
+}
+
+fn componentize(wasm: impl AsRef<[u8]>) -> anyhow::Result<Vec<u8>> {
+    use anyhow::Context as _;
+
+    wit_component::ComponentEncoder::default()
+        .validate(true)
+        .module(wasm.as_ref())
+        .context("failed to set core component module")?
+        .adapter(
+            WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME,
+            WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
+        )
+        .context("failed to add WASI adapter")?
+        .encode()
+        .context("failed to encode a component")
+}
+
+#[instrument(level = "trace", skip_all)]
+fn load_component(engine: &Engine, wasm: impl AsRef<[u8]>) -> wasmtime::Result<Component> {
+    let wasm = wasm.as_ref();
+    if wasmparser::Parser::is_core_wasm(wasm) {
+        let wasm = componentize(wasm).map_err(wasmtime::Error::from_anyhow)?;
+        Component::from_binary(engine, &wasm)
+    } else {
+        Component::from_binary(engine, wasm)
+    }
+}
+
+/// Link ABI event [`types::ComponentFunc`] in a [`LinkerInstance`]
+#[instrument(level = "trace", skip_all)]
+pub fn link_abi_event_function<T>(
+    linker: &mut LinkerInstance<T>,
+    _ty: types::ComponentFunc,
+    instance: &str,
+    name: &str,
+) -> wasmtime::Result<()> {
+    debug!(instance, name, "linking ABI instance event function");
+    let instance = Arc::<str>::from(instance);
+    let name = Arc::<str>::from(name);
+    linker.func_new(
+        &Arc::clone(&name),
+        move |mut _store, _ty, params, _results| {
+            info!(%instance, %name, ?params, "ABI event emitted");
+            Ok(())
+        },
+    )
+}
+
+/// Link dynamic imported instance in a [`LinkerInstance`].
+#[instrument(level = "trace", skip_all)]
+pub fn link_instance<V>(
+    engine: &Engine,
+    linker: &mut LinkerInstance<V>,
+    ty: types::ComponentInstance,
+    instance: &str,
+) -> wasmtime::Result<()> {
+    if let Some(_utxo) = ty.get_export(engine, "utxo") {
+        bail!("coordination scripts not supported yet")
+    }
+    for (name, types::ComponentExtern { ty, .. }) in ty.exports(engine) {
+        debug!(name, "linking ABI instance item");
+        match ty {
+            types::ComponentItem::ComponentFunc(ty) => {
+                link_abi_event_function(linker, ty, instance, name)?;
+            }
+            types::ComponentItem::CoreFunc(..) => {
+                bail!("ABI instance core function imports unsupported")
+            }
+            types::ComponentItem::Module(..) => bail!("ABI instance module imports unsupported"),
+            types::ComponentItem::Component(..) => {
+                bail!("ABI instance component imports unsupported")
+            }
+            types::ComponentItem::ComponentInstance(..) => {
+                bail!("ABI instance component instance imports unsupported")
+            }
+            types::ComponentItem::Type(..) => {}
+            types::ComponentItem::Resource(..) => {
+                bail!("ABI instance resource imports unsupported")
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Link dynamic imports of the contract
+#[instrument(level = "trace", skip_all)]
+pub fn link_dynamic_imports<V>(
+    engine: &Engine,
+    linker: &mut Linker<V>,
+    ty: types::Component,
+) -> wasmtime::Result<()> {
+    for (name, types::ComponentExtern { ty, .. }) in ty.imports(engine) {
+        match ty {
+            types::ComponentItem::ComponentFunc(..) => {
+                bail!("root instance function imports unsupported")
+            }
+            types::ComponentItem::CoreFunc(..) => {
+                bail!("core function imports unsupported")
+            }
+            types::ComponentItem::Module(..) => bail!("module imports unsupported"),
+            types::ComponentItem::Component(..) => bail!("component imports unsupported"),
+            types::ComponentItem::ComponentInstance(ty) => {
+                let mut linker = linker
+                    .instance(name)
+                    .with_context(|| format!("failed to instantiate `{name}` in the linker"))?;
+                debug!(?name, "linking root instance");
+                link_instance(engine, &mut linker, ty, name)?;
+            }
+            types::ComponentItem::Type(..) => {}
+            types::ComponentItem::Resource(..) => {
+                bail!("root instance resource imports unsupported")
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+pub struct Contract {
+    pre: InstancePre<Ctx>,
+    ty: types::Component,
+}
+
+impl Deref for Contract {
+    type Target = InstancePre<Ctx>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pre
+    }
+}
+
+impl Contract {
+    /// Load, link and instantiate `wasm` (a component or a core module with a
+    /// `component-type` section), returning a handle to drive it.
+    #[instrument(level = "trace", skip_all)]
+    pub fn new(wasm: impl AsRef<[u8]>) -> anyhow::Result<Self> {
+        let wasm = wasm.as_ref();
+
+        let mut config = Config::new();
+        config.wasm_component_model(true);
+
+        debug!("creating engine");
+        let engine = Engine::new(&config).context("failed to create engine")?;
+
+        debug!("loading component");
+        let component = load_component(&engine, wasm)?;
+
+        let mut linker = Linker::new(&engine);
+
+        debug!("linking component imports");
+        bindings::Host_::add_to_linker::<_, HasSelf<_>>(&mut linker, |cx| cx)
+            .context("failed to link builtins")?;
+        link_dynamic_imports(&engine, &mut linker, component.component_type())?;
+
+        let ty = linker
+            .substituted_component_type(&component)
+            .context("failed to derive component type")?;
+
+        debug!("pre-instantiating component");
+        let pre = linker
+            .instantiate_pre(&component)
+            .context("failed to pre-instantiate component")?;
+
+        Ok(Self { pre, ty })
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    fn get_utxo_typed(
+        &self,
+        name: &str,
+        instance_ty: types::ComponentInstance,
+    ) -> wasmtime::Result<UtxoExport> {
+        let engine = self.engine();
+        let component = self.component();
+        let instance_idx = component
+            .get_export_index(None, name)
+            .context("export not found")?;
+        let Some(types::ComponentExtern {
+            ty: types::ComponentItem::Resource(resource_ty),
+            ..
+        }) = instance_ty.get_export(engine, "utxo")
+        else {
+            bail!("instance does not export `utxo` resource")
+        };
+        let storage = instance_ty
+            .get_export(engine, "storage")
+            .map(|types::ComponentExtern { ty, .. }| {
+                let types::ComponentItem::Type(Type::Record(ty)) = ty else {
+                    bail!("`storage` export is not a record")
+                };
+
+                let (get_ty, get) = component
+                    .get_export(Some(&instance_idx), "get-storage")
+                    .context("`get-storage` export not found")?;
+                let types::ComponentItem::ComponentFunc(get_ty) = get_ty else {
+                    bail!("`get-storage` export is not a function")
+                };
+                let mut get_params = get_ty.params();
+                let (Some((_, Type::Borrow(get_resource_ty))), None) =
+                    (get_params.next(), get_params.next())
+                else {
+                    bail!(
+                        "`get-storage` does not take borrowed resource type as the only parameter"
+                    );
+                };
+                if get_resource_ty != resource_ty {
+                    bail!("`get-storage` resource type does not match UTXO resource type");
+                }
+                let mut get_results = get_ty.results();
+                let (Some(Type::Record(get_record_ty)), None) =
+                    (get_results.next(), get_results.next())
+                else {
+                    bail!("`get-storage` does not return a record as the only return value");
+                };
+                if get_record_ty != ty {
+                    bail!("`get-storage` record type does not match storage type");
+                }
+
+                let (set_ty, set) = component
+                    .get_export(Some(&instance_idx), "set-storage")
+                    .context("`set-storage` export not found")?;
+                let types::ComponentItem::ComponentFunc(set_ty) = set_ty else {
+                    bail!("`set-storage` export is not a function")
+                };
+                let mut set_params = set_ty.params();
+                let (
+                    Some((_, Type::Borrow(set_resource_ty))),
+                    Some((_, Type::Record(set_record_ty))),
+                    None,
+                ) = (set_params.next(), set_params.next(), set_params.next())
+                else {
+                    bail!(
+                        "`set-storage` does not take borrowed resource type and storage record and the only two parameters"
+                    );
+                };
+                if set_resource_ty != resource_ty {
+                    bail!("`set-storage` resource type does not match UTXO resource type");
+                }
+                if set_record_ty != ty {
+                    bail!("`set-storage` record type does not match storage type");
+                }
+                ensure!(set_ty.results().len() == 0, "`set-storage` should have not return values");
+
+                Ok(UtxoStorageExport { ty, get, set })
+            })
+            .transpose()?;
+        Ok(UtxoExport {
+            resource_ty,
+            instance_ty,
+            instance_idx,
+            storage,
+        })
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub fn get_utxo(&self, name: &str) -> wasmtime::Result<UtxoExport> {
+        let types::ComponentExtern { ty, .. } = self
+            .ty
+            .get_export(self.engine(), name)
+            .context("export not found")?;
+        let types::ComponentItem::ComponentInstance(ty) = ty else {
+            bail!("export is not an instance")
+        };
+        self.get_utxo_typed(name, ty)
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub fn utxos(&self) -> impl Iterator<Item = (&str, wasmtime::Result<UtxoExport>)> {
+        let engine = self.engine();
+        self.ty.exports(engine).filter_map(|(name, ty)| {
+            let types::ComponentExtern {
+                ty: types::ComponentItem::ComponentInstance(ty),
+                ..
+            } = ty
+            else {
+                return None;
+            };
+            Some((name, self.get_utxo_typed(name, ty)))
+        })
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    fn get_utxo_constructor_typed<'a>(
+        &'a self,
+        utxo: &'a UtxoExport,
+        name: &str,
+        ty: types::ComponentFunc,
+    ) -> wasmtime::Result<ConstructorExport> {
+        let idx = self
+            .component()
+            .get_export_index(Some(&utxo.instance_idx), name)
+            .context("export not found")?;
+
+        let (Some(Type::Own(resource_ty)), None) = ({
+            let mut result_tys = ty.results();
+            (result_tys.next(), result_tys.next())
+        }) else {
+            bail!("function does not return a single resource value")
+        };
+        if resource_ty != utxo.resource_ty {
+            bail!("function return value does not match UTXO resource type");
+        }
+        Ok(ConstructorExport { ty, idx })
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub fn get_utxo_constructor<'a>(
+        &'a self,
+        utxo: &'a UtxoExport,
+        name: &str,
+    ) -> wasmtime::Result<ConstructorExport> {
+        let types::ComponentExtern { ty, .. } = utxo
+            .instance_ty
+            .get_export(self.engine(), name)
+            .context("export not found")?;
+        let types::ComponentItem::ComponentFunc(ty) = ty else {
+            bail!("export is not a function")
+        };
+        self.get_utxo_constructor_typed(utxo, name, ty)
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub fn utxo_constructors<'a>(
+        &'a self,
+        utxo: &'a UtxoExport,
+    ) -> impl Iterator<Item = (&'a str, wasmtime::Result<ConstructorExport>)> {
+        utxo.instance_ty
+            .exports(self.engine())
+            .filter_map(move |(name, ty)| {
+                let types::ComponentExtern {
+                    ty: types::ComponentItem::ComponentFunc(ty),
+                    ..
+                } = ty
+                else {
+                    return None;
+                };
+                if !name.starts_with("[static]") {
+                    return None;
+                }
+                Some((name, self.get_utxo_constructor_typed(utxo, name, ty)))
+            })
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    fn get_utxo_method_typed<'a>(
+        &'a self,
+        utxo: &'a UtxoExport,
+        name: &str,
+        ty: types::ComponentFunc,
+    ) -> wasmtime::Result<MethodExport> {
+        let idx = self
+            .component()
+            .get_export_index(Some(&utxo.instance_idx), name)
+            .context("export not found")?;
+
+        let Some((_, Type::Borrow(resource_ty))) = ty.params().next() else {
+            bail!("function does not take borrowed resource type as first parameter");
+        };
+        if resource_ty != utxo.resource_ty {
+            bail!("resource type does not match UTXO resource type");
+        }
+        Ok(MethodExport { ty, idx })
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub fn get_utxo_method<'a>(
+        &'a self,
+        utxo: &'a UtxoExport,
+        name: &str,
+    ) -> wasmtime::Result<MethodExport> {
+        let types::ComponentExtern { ty, .. } = utxo
+            .instance_ty
+            .get_export(self.engine(), name)
+            .context("export not found")?;
+        let types::ComponentItem::ComponentFunc(ty) = ty else {
+            bail!("export is not a function")
+        };
+        self.get_utxo_method_typed(utxo, name, ty)
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub fn utxo_methods<'a>(
+        &'a self,
+        utxo: &'a UtxoExport,
+    ) -> impl Iterator<Item = (&'a str, wasmtime::Result<MethodExport>)> {
+        utxo.instance_ty
+            .exports(self.engine())
+            .filter_map(move |(name, ty)| {
+                let types::ComponentExtern {
+                    ty: types::ComponentItem::ComponentFunc(ty),
+                    ..
+                } = ty
+                else {
+                    return None;
+                };
+                if !name.starts_with("[method]") {
+                    return None;
+                }
+                Some((name, self.get_utxo_method_typed(utxo, name, ty)))
+            })
+    }
+
+    pub fn instantiate_utxo(
+        &self,
+        export: &ConstructorExport,
+        params: impl AsRef<[wasmtime::component::Val]>,
+    ) -> wasmtime::Result<Utxo> {
+        let mut store = Store::new(self.engine(), Ctx);
+
+        debug!("instantiating component");
+        let instance = self
+            .instantiate(&mut store)
+            .context("failed to instantiate component")?;
+        let f = instance
+            .get_func(&mut store, export.idx)
+            .context("failed to lookup constructor function export")?;
+
+        debug!("calling constructor function");
+        let mut results = [wasmtime::component::Val::Bool(false)];
+        f.call(&mut store, params.as_ref(), &mut results)
+            .context("failed to call constructor function")?;
+        let [wasmtime::component::Val::Resource(resource)] = results else {
+            bail!("invalid return value")
+        };
+
+        Ok(Utxo {
+            store,
+            instance,
+            resource,
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct UtxoStorageExport {
+    ty: types::Record,
+    get: ComponentExportIndex,
+    set: ComponentExportIndex,
+}
+
+impl UtxoStorageExport {
+    pub fn ty(&self) -> &types::Record {
+        &self.ty
+    }
+}
+
+#[derive(Clone)]
+pub struct UtxoExport {
+    resource_ty: ResourceType,
+    instance_ty: types::ComponentInstance,
+    instance_idx: ComponentExportIndex,
+    storage: Option<UtxoStorageExport>,
+}
+
+impl UtxoExport {
+    pub fn storage(&self) -> Option<&UtxoStorageExport> {
+        self.storage.as_ref()
+    }
+}
+
+#[derive(Clone)]
+pub struct ConstructorExport {
+    ty: types::ComponentFunc,
+    idx: ComponentExportIndex,
+}
+
+impl ConstructorExport {
+    pub fn ty(&self) -> &types::ComponentFunc {
+        &self.ty
+    }
+}
+
+#[derive(Clone)]
+pub struct MethodExport {
+    ty: types::ComponentFunc,
+    idx: ComponentExportIndex,
+}
+
+impl MethodExport {
+    pub fn ty(&self) -> &types::ComponentFunc {
+        &self.ty
+    }
+}
+
+pub struct Utxo {
+    store: Store<Ctx>,
+    instance: Instance,
+    resource: ResourceAny,
+}
+
+impl AsContext for Utxo {
+    type Data = Ctx;
+
+    fn as_context(&self) -> StoreContext<'_, Self::Data> {
+        self.store.as_context()
+    }
+}
+
+impl AsContextMut for Utxo {
+    fn as_context_mut(&mut self) -> StoreContextMut<'_, Self::Data> {
+        self.store.as_context_mut()
+    }
+}
+
+impl Utxo {
+    pub fn store(&mut self) -> &mut Store<Ctx> {
+        &mut self.store
+    }
+
+    pub fn resource(&self) -> ResourceAny {
+        self.resource
+    }
+
+    pub fn storage(&mut self, export: &UtxoStorageExport) -> UtxoStorage<'_> {
+        UtxoStorage {
+            utxo: self,
+            get: export.get,
+            set: export.set,
+        }
+    }
+
+    pub fn call(
+        &mut self,
+        export: &MethodExport,
+        params: impl AsRef<[wasmtime::component::Val]>,
+    ) -> wasmtime::Result<Box<[wasmtime::component::Val]>> {
+        let f = self
+            .instance
+            .get_func(&mut self.store, export.idx)
+            .context("function export not found")?;
+
+        let mut results = vec![wasmtime::component::Val::Bool(false); export.ty.results().len()];
+        f.call(&mut self.store, params.as_ref(), &mut results)
+            .context("failed to call method")?;
+        Ok(results.into_boxed_slice())
+    }
+}
+
+pub struct UtxoStorage<'a> {
+    utxo: &'a mut Utxo,
+    get: ComponentExportIndex,
+    set: ComponentExportIndex,
+}
+
+impl UtxoStorage<'_> {
+    pub fn get(&mut self) -> wasmtime::Result<Vec<(String, wasmtime::component::Val)>> {
+        let f = self
+            .utxo
+            .instance
+            .get_func(&mut self.utxo.store, self.get)
+            .context("function export not found")?;
+
+        let mut results = [wasmtime::component::Val::Bool(false); 1];
+        f.call(
+            &mut self.utxo.store,
+            &[wasmtime::component::Val::Resource(self.utxo.resource)],
+            &mut results,
+        )
+        .context("failed to call function")?;
+        let [wasmtime::component::Val::Record(vs)] = results else {
+            bail!("invalid return value")
+        };
+        Ok(vs)
+    }
+
+    pub fn set(
+        &mut self,
+        fields: impl Into<Vec<(String, wasmtime::component::Val)>>,
+    ) -> wasmtime::Result<()> {
+        let f = self
+            .utxo
+            .instance
+            .get_func(&mut self.utxo.store, self.set)
+            .context("function export not found")?;
+
+        f.call(
+            &mut self.utxo.store,
+            &[
+                wasmtime::component::Val::Resource(self.utxo.resource),
+                wasmtime::component::Val::Record(fields.into()),
+            ],
+            &mut [],
+        )
+        .context("failed to call function")?;
+        Ok(())
+    }
+}
