@@ -17,7 +17,7 @@
             pkgs.llvmPackages.clang-unwrapped
             pkgs.nodejs_24
             pkgs.wabt
-            pkgs.wasm-bindgen-cli_0_2_105
+            pkgs.wasm-bindgen-cli_0_2_121
             pkgs.wasm-tools
           ];
 
