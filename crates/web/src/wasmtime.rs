@@ -120,3 +120,17 @@ pub unsafe extern "C" fn wasmtime_memory_image_map_at(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_memory_image_free(_image: *mut c_void) {}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wasmtime_fiber_init(
+    top_of_stack: *mut u8,
+    entry: extern "C" fn(*mut u8, *mut u8) -> *mut u8,
+    entry_arg0: *mut u8,
+) {
+    todo!("wasmtime_fiber_init {top_of_stack:?} {entry:?} {entry_arg0:?}")
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wasmtime_fiber_switch(top_of_stack: *mut u8) {
+    todo!("wasmtime_fiber_switch {top_of_stack:?}")
+}

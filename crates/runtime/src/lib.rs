@@ -6,8 +6,8 @@ use wasi_preview1_component_adapter_provider::{
     WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME, WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
 };
 use wasmtime::component::{
-    Component, ComponentExportIndex, HasSelf, Instance, InstancePre, Linker, LinkerInstance,
-    ResourceAny, ResourceType, Type, types,
+    Component, ComponentExportIndex, ExportLookup, Func, HasSelf, Instance, InstancePre, Linker,
+    LinkerInstance, ResourceAny, ResourceType, Type, types,
 };
 use wasmtime::error::Context as _;
 use wasmtime::{
@@ -555,6 +555,38 @@ impl Contract {
             resource,
         })
     }
+
+    pub async fn instantiate_utxo_async(
+        &self,
+        export: &ConstructorExport,
+        params: impl AsRef<[wasmtime::component::Val]>,
+    ) -> wasmtime::Result<Utxo> {
+        let mut store = Store::new(self.engine(), Ctx);
+
+        debug!("instantiating component");
+        let instance = self
+            .instantiate_async(&mut store)
+            .await
+            .context("failed to instantiate component")?;
+        let f = instance
+            .get_func(&mut store, export.idx)
+            .context("failed to lookup constructor function export")?;
+
+        debug!("calling constructor function");
+        let mut results = [wasmtime::component::Val::Bool(false)];
+        f.call_async(&mut store, params.as_ref(), &mut results)
+            .await
+            .context("failed to call constructor function")?;
+        let [wasmtime::component::Val::Resource(resource)] = results else {
+            bail!("invalid return value")
+        };
+
+        Ok(Utxo {
+            store,
+            instance,
+            resource,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -645,18 +677,33 @@ impl Utxo {
         }
     }
 
+    fn get_function_export(&mut self, name: impl ExportLookup) -> wasmtime::Result<Func> {
+        self.instance
+            .get_func(&mut self.store, name)
+            .context("function export not found")
+    }
+
     pub fn call(
         &mut self,
         export: &MethodExport,
         params: impl AsRef<[wasmtime::component::Val]>,
     ) -> wasmtime::Result<Box<[wasmtime::component::Val]>> {
-        let f = self
-            .instance
-            .get_func(&mut self.store, export.idx)
-            .context("function export not found")?;
-
+        let f = self.get_function_export(export.idx)?;
         let mut results = vec![wasmtime::component::Val::Bool(false); export.ty.results().len()];
         f.call(&mut self.store, params.as_ref(), &mut results)
+            .context("failed to call method")?;
+        Ok(results.into_boxed_slice())
+    }
+
+    pub async fn call_async(
+        &mut self,
+        export: &MethodExport,
+        params: impl AsRef<[wasmtime::component::Val]>,
+    ) -> wasmtime::Result<Box<[wasmtime::component::Val]>> {
+        let f = self.get_function_export(export.idx)?;
+        let mut results = vec![wasmtime::component::Val::Bool(false); export.ty.results().len()];
+        f.call_async(&mut self.store, params.as_ref(), &mut results)
+            .await
             .context("failed to call method")?;
         Ok(results.into_boxed_slice())
     }
@@ -670,12 +717,7 @@ pub struct UtxoStorage<'a> {
 
 impl UtxoStorage<'_> {
     pub fn get(&mut self) -> wasmtime::Result<Vec<(String, wasmtime::component::Val)>> {
-        let f = self
-            .utxo
-            .instance
-            .get_func(&mut self.utxo.store, self.get)
-            .context("function export not found")?;
-
+        let f = self.utxo.get_function_export(self.get)?;
         let mut results = [wasmtime::component::Val::Bool(false); 1];
         f.call(
             &mut self.utxo.store,
@@ -689,16 +731,27 @@ impl UtxoStorage<'_> {
         Ok(vs)
     }
 
+    pub async fn get_async(&mut self) -> wasmtime::Result<Vec<(String, wasmtime::component::Val)>> {
+        let f = self.utxo.get_function_export(self.get)?;
+        let mut results = [wasmtime::component::Val::Bool(false); 1];
+        f.call_async(
+            &mut self.utxo.store,
+            &[wasmtime::component::Val::Resource(self.utxo.resource)],
+            &mut results,
+        )
+        .await
+        .context("failed to call function")?;
+        let [wasmtime::component::Val::Record(vs)] = results else {
+            bail!("invalid return value")
+        };
+        Ok(vs)
+    }
+
     pub fn set(
         &mut self,
         fields: impl Into<Vec<(String, wasmtime::component::Val)>>,
     ) -> wasmtime::Result<()> {
-        let f = self
-            .utxo
-            .instance
-            .get_func(&mut self.utxo.store, self.set)
-            .context("function export not found")?;
-
+        let f = self.utxo.get_function_export(self.set)?;
         f.call(
             &mut self.utxo.store,
             &[
@@ -707,6 +760,24 @@ impl UtxoStorage<'_> {
             ],
             &mut [],
         )
+        .context("failed to call function")?;
+        Ok(())
+    }
+
+    pub async fn set_async(
+        &mut self,
+        fields: impl Into<Vec<(String, wasmtime::component::Val)>>,
+    ) -> wasmtime::Result<()> {
+        let f = self.utxo.get_function_export(self.set)?;
+        f.call_async(
+            &mut self.utxo.store,
+            &[
+                wasmtime::component::Val::Resource(self.utxo.resource),
+                wasmtime::component::Val::Record(fields.into()),
+            ],
+            &mut [],
+        )
+        .await
         .context("failed to call function")?;
         Ok(())
     }

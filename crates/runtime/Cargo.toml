@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [features]
+wasmtime-custom-fiber = ["wasmtime/custom-fiber"]
 wasmtime-custom-virtual-memory = ["wasmtime/custom-virtual-memory"]
 
 [dependencies]
@@ -13,6 +14,7 @@ wasi-preview1-component-adapter-provider = { workspace = true }
 wasmparser = { workspace = true }
 wasmtime = { workspace = true, features = [
     "anyhow",
+    "async",
     "component-model",
     "cranelift",
     "runtime",

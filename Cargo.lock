@@ -225,7 +225,7 @@ dependencies = [
 [[package]]
 name = "cranelift-assembler-x64"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cranelift-assembler-x64-meta",
 ]
@@ -233,7 +233,7 @@ dependencies = [
 [[package]]
 name = "cranelift-assembler-x64-meta"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cranelift-srcgen",
 ]
@@ -241,7 +241,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bforest"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cranelift-entity",
  "wasmtime-internal-core",
@@ -250,7 +250,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bitset"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "serde",
  "serde_derive",
@@ -260,7 +260,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "bumpalo",
  "cranelift-assembler-x64",
@@ -290,7 +290,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-meta"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cranelift-assembler-x64-meta",
  "cranelift-codegen-shared",
@@ -302,12 +302,12 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-shared"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 
 [[package]]
 name = "cranelift-control"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "arbitrary",
 ]
@@ -315,7 +315,7 @@ dependencies = [
 [[package]]
 name = "cranelift-entity"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cranelift-bitset",
  "serde",
@@ -326,7 +326,7 @@ dependencies = [
 [[package]]
 name = "cranelift-frontend"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cranelift-codegen",
  "hashbrown 0.17.1",
@@ -338,12 +338,12 @@ dependencies = [
 [[package]]
 name = "cranelift-isle"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 
 [[package]]
 name = "cranelift-native"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cranelift-codegen",
  "libc",
@@ -353,7 +353,7 @@ dependencies = [
 [[package]]
 name = "cranelift-srcgen"
 version = "0.134.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 
 [[package]]
 name = "crc32fast"
@@ -733,7 +733,7 @@ dependencies = [
 [[package]]
 name = "pulley-interpreter"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cranelift-bitset",
  "log",
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "pulley-macros"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1220,7 +1220,7 @@ dependencies = [
 [[package]]
 name = "wasmtime"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "addr2line",
  "async-trait",
@@ -1261,7 +1261,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-environ"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "anyhow",
  "cpp_demangle",
@@ -1291,7 +1291,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-component-macro"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "anyhow",
  "proc-macro2",
@@ -1305,12 +1305,12 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-component-util"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 
 [[package]]
 name = "wasmtime-internal-core"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "anyhow",
  "hashbrown 0.17.1",
@@ -1321,7 +1321,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-cranelift"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cfg-if",
  "cranelift-codegen",
@@ -1347,7 +1347,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-fiber"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cc",
  "cfg-if",
@@ -1361,7 +1361,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-jit-debug"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cc",
  "wasmtime-internal-versioned-export-macros",
@@ -1370,7 +1370,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-jit-icache-coherence"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cfg-if",
  "libc",
@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-unwinder"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "cfg-if",
  "cranelift-codegen",
@@ -1393,7 +1393,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-versioned-export-macros"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1403,7 +1403,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-internal-wit-bindgen"
 version = "47.0.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=57fdb23fa7f9952b8c867347e2b18f59618c74ce#57fdb23fa7f9952b8c867347e2b18f59618c74ce"
+source = "git+https://github.com/rvolosatovs/wasmtime?branch=feat%2Fcustom-fiber#576c4afdf5759902e11978598f77e9796fc62d50"
 dependencies = [
  "anyhow",
  "bitflags",
