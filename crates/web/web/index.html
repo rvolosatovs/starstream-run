@@ -71,6 +71,15 @@
       }
       footer { margin-top: 2rem; color: var(--muted); font-size: 0.85rem; }
       code { background: var(--panel); padding: 0.1rem 0.35rem; border-radius: 4px; }
+      a { color: var(--accent); }
+      .links {
+        display: flex;
+        gap: 1rem;
+        margin: 0 0 1.5rem;
+        font-size: 0.9rem;
+      }
+      .links a { text-decoration: none; }
+      .links a:hover { text-decoration: underline; }
       #log {
         background: var(--panel);
         border-radius: 8px;
@@ -213,6 +222,11 @@
         Load, link and instantiate a Starstream contract in the browser — run
         entirely client-side via wasmtime's Pulley interpreter.
       </p>
+
+      <nav class="links">
+        <a href="https://github.com/rvolosatovs/starstream-run" target="_blank" rel="noopener">GitHub repo</a>
+        <a href="https://starstream-run.netlify.app/" target="_blank" rel="noopener">Live deployment</a>
+      </nav>
 
       <label class="drop" id="drop">
         <input type="file" id="file" accept=".wasm,application/wasm" />
