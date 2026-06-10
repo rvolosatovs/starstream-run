@@ -5,16 +5,13 @@ use tracing::{debug, error, info, instrument, warn};
 use wasi_preview1_component_adapter_provider::{
     WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME, WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
 };
+use wasmtime::component::{
+    Component, ComponentExportIndex, HasSelf, Instance, InstancePre, Linker, LinkerInstance,
+    ResourceAny, ResourceType, Type, types,
+};
 use wasmtime::error::Context as _;
 use wasmtime::{
-    AsContext, AsContextMut, Config, Engine, Store, StoreContext, StoreContextMut, bail,
-};
-use wasmtime::{
-    component::{
-        Component, ComponentExportIndex, HasSelf, Instance, InstancePre, Linker, LinkerInstance,
-        ResourceAny, ResourceType, Type, types,
-    },
-    ensure,
+    AsContext, AsContextMut, Config, Engine, Store, StoreContext, StoreContextMut, bail, ensure,
 };
 
 mod bindings {
