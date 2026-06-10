@@ -215,6 +215,10 @@ pub fn link_dynamic_imports<V>(
     ty: types::Component,
 ) -> wasmtime::Result<()> {
     for (name, types::ComponentExtern { ty, .. }) in ty.imports(engine) {
+        if let Some(("starstream:std", ..)) = name.split_once('/') {
+            debug!(?name, "skipping builtin instance import");
+            continue;
+        }
         match ty {
             types::ComponentItem::ComponentFunc(..) => {
                 bail!("root instance function imports unsupported")
