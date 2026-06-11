@@ -25,6 +25,6 @@ fn main() -> anyhow::Result<()> {
 
     let wasm = fs::read(&wasm)
         .with_context(|| format!("failed to read bytes from `{}`", wasm.display()))?;
-    starstream_run::Contract::new(wasm)?;
+    starstream_run::Contract::<starstream_run_cli::Ctx>::new(wasm)?;
     Ok(())
 }

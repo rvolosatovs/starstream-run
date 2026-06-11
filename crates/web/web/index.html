@@ -550,9 +550,11 @@
           ]),
         );
 
-        dropBtn.addEventListener("click", () => {
+        dropBtn.addEventListener("click", async () => {
+          dropBtn.disabled = true;
           try {
-            contract.dropResource(id);
+            // Runs the guest's resource destructor — async (a Promise).
+            await contract.dropResource(id);
           } catch (err) {
             // Surface the failure but still remove the card from the UI.
             console.warn("dropResource failed", err);

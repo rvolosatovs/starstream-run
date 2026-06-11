@@ -1,7 +1,8 @@
 use core::ops::Deref;
+
 use std::sync::Arc;
 
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, info, instrument};
 use wasi_preview1_component_adapter_provider::{
     WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME, WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
 };
@@ -14,7 +15,7 @@ use wasmtime::{
     AsContext, AsContextMut, Config, Engine, Store, StoreContext, StoreContextMut, bail,
 };
 
-mod bindings {
+pub mod bindings {
     wasmtime::component::bindgen!({
         inline: "
             package starstream:host;
@@ -24,27 +25,39 @@ mod bindings {
                 import starstream:std/cardano;
             }
         ",
+        imports: {
+            "starstream:std/builtin.implements-method": tracing | trappable,
+            default: tracing,
+        }
     });
 }
 
-pub struct Ctx;
-
-impl bindings::starstream::std::builtin::Host for Ctx {
-    fn implements_method(&mut self, hash: (u64, u64, u64, u64)) {
-        error!("called builtin#implements_method {hash:?}");
-    }
+/// Store data backing a [`Contract`]'s instances.
+///
+/// A `Contract` is generic over its store-data type `T`, which carries the
+/// `starstream:std` host-import state and so must implement the generated
+/// builtin and cardano host traits ([`bindings::starstream::std::builtin::Host`]
+/// / [`bindings::starstream::std::cardano::Host`]) — these are wired into the
+/// linker by [`Contract::new`]. The runtime itself does not provide an
+/// implementation; the CLI and web crates each supply their own.
+///
+/// Each UTXO handle is its own instantiation with its own store, so the caller
+/// passes the store data value in when minting or loading a UTXO (see
+/// [`Contract::create_utxo`] / [`Contract::load_utxo`]) rather than the runtime
+/// default-constructing it.
+///
+/// This trait is a blanket alias for those bounds, so any type that satisfies
+/// them implements it automatically.
+pub trait Host:
+    bindings::starstream::std::builtin::Host + bindings::starstream::std::cardano::Host + 'static
+{
 }
 
-impl bindings::starstream::std::cardano::Host for Ctx {
-    fn block_height(&mut self) -> i64 {
-        error!("called cardano#block_height");
-        0
-    }
-
-    fn current_slot(&mut self) -> i64 {
-        error!("called cardano#current_slot");
-        0
-    }
+impl<T> Host for T where
+    T: bindings::starstream::std::builtin::Host
+        + bindings::starstream::std::cardano::Host
+        + 'static
+{
 }
 
 pub enum Val {
@@ -170,9 +183,9 @@ pub fn link_abi_event_function<T>(
 
 /// Link dynamic imported instance in a [`LinkerInstance`].
 #[instrument(level = "trace", skip_all)]
-pub fn link_instance<V>(
+pub fn link_instance<T>(
     engine: &Engine,
-    linker: &mut LinkerInstance<V>,
+    linker: &mut LinkerInstance<T>,
     ty: types::ComponentInstance,
     instance: &str,
 ) -> wasmtime::Result<()> {
@@ -206,9 +219,9 @@ pub fn link_instance<V>(
 
 /// Link dynamic imports of the contract
 #[instrument(level = "trace", skip_all)]
-pub fn link_dynamic_imports<V>(
+pub fn link_dynamic_imports<T>(
     engine: &Engine,
-    linker: &mut Linker<V>,
+    linker: &mut Linker<T>,
     ty: types::Component,
 ) -> wasmtime::Result<()> {
     for (name, types::ComponentExtern { ty, .. }) in ty.imports(engine) {
@@ -241,21 +254,31 @@ pub fn link_dynamic_imports<V>(
     Ok(())
 }
 
-#[derive(Clone)]
-pub struct Contract {
-    pre: InstancePre<Ctx>,
+pub struct Contract<T: 'static> {
+    pre: InstancePre<T>,
     ty: types::Component,
 }
 
-impl Deref for Contract {
-    type Target = InstancePre<Ctx>;
+// Hand-written so the bound is `T` (not `T: Clone`): `InstancePre<T>` and
+// `types::Component` are both cheap-to-clone handles regardless of `T`.
+impl<T: 'static> Clone for Contract<T> {
+    fn clone(&self) -> Self {
+        Self {
+            pre: self.pre.clone(),
+            ty: self.ty.clone(),
+        }
+    }
+}
+
+impl<T: 'static> Deref for Contract<T> {
+    type Target = InstancePre<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.pre
     }
 }
 
-impl Contract {
+impl<T: Host> Contract<T> {
     /// Load, link and instantiate `wasm` (a component or a core module with a
     /// `component-type` section), returning a handle to drive it.
     #[instrument(level = "trace", skip_all)]
@@ -263,7 +286,7 @@ impl Contract {
         let wasm = wasm.as_ref();
 
         let mut config = Config::new();
-        config.wasm_component_model(true);
+        config.guest_debug(true).wasm_component_model(true);
 
         debug!("creating engine");
         let engine = Engine::new(&config).context("failed to create engine")?;
@@ -408,9 +431,9 @@ impl Contract {
     }
 
     #[instrument(level = "trace", skip_all)]
-    fn get_utxo_constructor_typed<'a>(
-        &'a self,
-        utxo: &'a UtxoExport,
+    fn get_utxo_constructor_typed(
+        &self,
+        utxo: &UtxoExport,
         name: &str,
         ty: types::ComponentFunc,
     ) -> wasmtime::Result<ConstructorExport> {
@@ -432,9 +455,9 @@ impl Contract {
     }
 
     #[instrument(level = "trace", skip_all)]
-    pub fn get_utxo_constructor<'a>(
-        &'a self,
-        utxo: &'a UtxoExport,
+    pub fn get_utxo_constructor(
+        &self,
+        utxo: &UtxoExport,
         name: &str,
     ) -> wasmtime::Result<ConstructorExport> {
         let types::ComponentExtern { ty, .. } = utxo
@@ -470,9 +493,9 @@ impl Contract {
     }
 
     #[instrument(level = "trace", skip_all)]
-    fn get_utxo_method_typed<'a>(
-        &'a self,
-        utxo: &'a UtxoExport,
+    fn get_utxo_method_typed(
+        &self,
+        utxo: &UtxoExport,
         name: &str,
         ty: types::ComponentFunc,
     ) -> wasmtime::Result<MethodExport> {
@@ -491,11 +514,7 @@ impl Contract {
     }
 
     #[instrument(level = "trace", skip_all)]
-    pub fn get_utxo_method<'a>(
-        &'a self,
-        utxo: &'a UtxoExport,
-        name: &str,
-    ) -> wasmtime::Result<MethodExport> {
+    pub fn get_utxo_method(&self, utxo: &UtxoExport, name: &str) -> wasmtime::Result<MethodExport> {
         let types::ComponentExtern { ty, .. } = utxo
             .instance_ty
             .get_export(self.engine(), name)
@@ -529,8 +548,14 @@ impl Contract {
     }
 
     #[instrument(level = "trace", skip_all)]
-    fn instantiate(&self) -> wasmtime::Result<(Store<Ctx>, Instance)> {
-        let mut store = Store::new(self.engine(), Ctx);
+    fn new_store(&self, ctx: T) -> Store<T> {
+        Store::new(self.engine(), ctx)
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    fn instantiate(&self, ctx: T) -> wasmtime::Result<(Store<T>, Instance)> {
+        let mut store = self.new_store(ctx);
+
         debug!("instantiating component");
         let instance = self
             .pre
@@ -540,12 +565,72 @@ impl Contract {
     }
 
     #[instrument(level = "trace", skip_all)]
+    #[cfg(feature = "async")]
+    async fn instantiate_async(&self, ctx: T) -> wasmtime::Result<(Store<T>, Instance)>
+    where
+        T: Send,
+    {
+        let mut store = self.new_store(ctx);
+
+        #[cfg(feature = "trace")]
+        {
+            use core::marker::PhantomData;
+
+            use wasmtime::DebugEvent;
+
+            struct DebugHandler<T>(PhantomData<fn() -> T>);
+
+            impl<T> Clone for DebugHandler<T> {
+                fn clone(&self) -> Self {
+                    Self(PhantomData)
+                }
+            }
+
+            impl<T: 'static + Send> wasmtime::DebugHandler for DebugHandler<T> {
+                type Data = T;
+
+                async fn handle(
+                    &self,
+                    _store: StoreContextMut<'_, Self::Data>,
+                    event: DebugEvent<'_>,
+                ) {
+                    match event {
+                        DebugEvent::Breakpoint => {
+                            info!("breakpoint");
+                        }
+                        DebugEvent::HostcallError(..)
+                        | DebugEvent::Exception(..)
+                        | DebugEvent::Trap(..)
+                        | DebugEvent::EpochYield => {}
+                    }
+                }
+            }
+            store.set_debug_handler(DebugHandler::<T>(PhantomData));
+            {
+                let Some(mut bp) = store.edit_breakpoints() else {
+                    bail!("invalid engine config")
+                };
+                bp.single_step(true)
+                    .context("failed to enable single-step debugging")?;
+            }
+        }
+        debug!("instantiating component");
+        let instance = self
+            .pre
+            .instantiate_async(&mut store)
+            .await
+            .context("failed to instantiate component")?;
+        Ok((store, instance))
+    }
+
+    #[instrument(level = "trace", skip_all)]
     fn construct_utxo(
         &self,
+        ctx: T,
         name: impl ExportLookup,
         params: impl AsRef<[wasmtime::component::Val]>,
-    ) -> wasmtime::Result<Utxo> {
-        let (mut store, instance) = self.instantiate()?;
+    ) -> wasmtime::Result<Utxo<T>> {
+        let (mut store, instance) = self.instantiate(ctx)?;
         let f = instance
             .get_func(&mut store, name)
             .context("failed to lookup constructor function export")?;
@@ -567,10 +652,14 @@ impl Contract {
     #[cfg(feature = "async")]
     async fn construct_utxo_async(
         &self,
+        ctx: T,
         name: impl ExportLookup,
         params: impl AsRef<[wasmtime::component::Val]>,
-    ) -> wasmtime::Result<Utxo> {
-        let (mut store, instance) = self.instantiate()?;
+    ) -> wasmtime::Result<Utxo<T>>
+    where
+        T: Send,
+    {
+        let (mut store, instance) = self.instantiate_async(ctx).await?;
         let f = instance
             .get_func(&mut store, name)
             .context("failed to lookup constructor function export")?;
@@ -592,39 +681,49 @@ impl Contract {
     #[instrument(level = "trace", skip_all)]
     pub fn create_utxo(
         &self,
+        ctx: T,
         ConstructorExport { idx, .. }: &ConstructorExport,
         params: impl AsRef<[wasmtime::component::Val]>,
-    ) -> wasmtime::Result<Utxo> {
-        self.construct_utxo(idx, params)
+    ) -> wasmtime::Result<Utxo<T>> {
+        self.construct_utxo(ctx, idx, params)
     }
 
     #[instrument(level = "trace", skip_all)]
     #[cfg(feature = "async")]
     pub async fn create_utxo_async(
         &self,
+        ctx: T,
         ConstructorExport { idx, .. }: &ConstructorExport,
         params: impl AsRef<[wasmtime::component::Val]>,
-    ) -> wasmtime::Result<Utxo> {
-        self.construct_utxo_async(idx, params).await
+    ) -> wasmtime::Result<Utxo<T>>
+    where
+        T: Send,
+    {
+        self.construct_utxo_async(ctx, idx, params).await
     }
 
     #[instrument(level = "trace", skip_all)]
     pub fn load_utxo(
         &self,
+        ctx: T,
         UtxoStorageExport { set, .. }: &UtxoStorageExport,
         fields: impl Into<Vec<(String, wasmtime::component::Val)>>,
-    ) -> wasmtime::Result<Utxo> {
-        self.construct_utxo(set, [wasmtime::component::Val::Record(fields.into())])
+    ) -> wasmtime::Result<Utxo<T>> {
+        self.construct_utxo(ctx, set, [wasmtime::component::Val::Record(fields.into())])
     }
 
     #[instrument(level = "trace", skip_all)]
     #[cfg(feature = "async")]
     pub async fn load_utxo_async(
         &self,
+        ctx: T,
         UtxoStorageExport { set, .. }: &UtxoStorageExport,
         fields: impl Into<Vec<(String, wasmtime::component::Val)>>,
-    ) -> wasmtime::Result<Utxo> {
-        self.construct_utxo_async(set, [wasmtime::component::Val::Record(fields.into())])
+    ) -> wasmtime::Result<Utxo<T>>
+    where
+        T: Send,
+    {
+        self.construct_utxo_async(ctx, set, [wasmtime::component::Val::Record(fields.into())])
             .await
     }
 }
@@ -680,28 +779,28 @@ impl MethodExport {
     }
 }
 
-pub struct Utxo {
-    store: Store<Ctx>,
+pub struct Utxo<T: 'static> {
+    store: Store<T>,
     instance: Instance,
     resource: ResourceAny,
 }
 
-impl AsContext for Utxo {
-    type Data = Ctx;
+impl<T: 'static> AsContext for Utxo<T> {
+    type Data = T;
 
     fn as_context(&self) -> StoreContext<'_, Self::Data> {
         self.store.as_context()
     }
 }
 
-impl AsContextMut for Utxo {
+impl<T: 'static> AsContextMut for Utxo<T> {
     fn as_context_mut(&mut self) -> StoreContextMut<'_, Self::Data> {
         self.store.as_context_mut()
     }
 }
 
-impl Utxo {
-    pub fn store(&mut self) -> &mut Store<Ctx> {
+impl<T: 'static> Utxo<T> {
+    pub fn store(&mut self) -> &mut Store<T> {
         &mut self.store
     }
 
@@ -709,7 +808,7 @@ impl Utxo {
         self.resource
     }
 
-    pub fn storage(&mut self, export: &UtxoStorageExport) -> UtxoStorage<'_> {
+    pub fn storage(&mut self, export: &UtxoStorageExport) -> UtxoStorage<'_, T> {
         UtxoStorage {
             utxo: self,
             get: export.get,
@@ -741,7 +840,10 @@ impl Utxo {
         &mut self,
         export: &MethodExport,
         params: impl AsRef<[wasmtime::component::Val]>,
-    ) -> wasmtime::Result<Box<[wasmtime::component::Val]>> {
+    ) -> wasmtime::Result<Box<[wasmtime::component::Val]>>
+    where
+        T: Send,
+    {
         let f = self.get_function_export(export.idx)?;
         let mut results = vec![wasmtime::component::Val::Bool(false); export.ty.results().len()];
         f.call_async(&mut self.store, params.as_ref(), &mut results)
@@ -749,14 +851,28 @@ impl Utxo {
             .context("failed to call method")?;
         Ok(results.into_boxed_slice())
     }
+
+    #[instrument(level = "trace", skip_all)]
+    pub fn drop(mut self) -> wasmtime::Result<()> {
+        self.resource.resource_drop(&mut self.store)
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    #[cfg(feature = "async")]
+    pub async fn drop_async(mut self) -> wasmtime::Result<()>
+    where
+        T: Send,
+    {
+        self.resource.resource_drop_async(&mut self.store).await
+    }
 }
 
-pub struct UtxoStorage<'a> {
-    utxo: &'a mut Utxo,
+pub struct UtxoStorage<'a, T: 'static> {
+    utxo: &'a mut Utxo<T>,
     get: ComponentExportIndex,
 }
 
-impl UtxoStorage<'_> {
+impl<T: 'static> UtxoStorage<'_, T> {
     #[instrument(level = "trace", skip_all)]
     pub fn get(&mut self) -> wasmtime::Result<Vec<(String, wasmtime::component::Val)>> {
         let f = self.utxo.get_function_export(self.get)?;
@@ -775,7 +891,10 @@ impl UtxoStorage<'_> {
 
     #[instrument(level = "trace", skip_all)]
     #[cfg(feature = "async")]
-    pub async fn get_async(&mut self) -> wasmtime::Result<Vec<(String, wasmtime::component::Val)>> {
+    pub async fn get_async(&mut self) -> wasmtime::Result<Vec<(String, wasmtime::component::Val)>>
+    where
+        T: Send,
+    {
         let f = self.utxo.get_function_export(self.get)?;
         let mut results = [wasmtime::component::Val::Bool(false); 1];
         f.call_async(

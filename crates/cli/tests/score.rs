@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use starstream_run::{Contract, MethodExport, Utxo};
+use starstream_run_cli::Ctx;
 use wasmtime::component::Val;
 
 const WASM_TARGET: &str = "wasm32-unknown-unknown";
@@ -61,7 +62,7 @@ fn builds_and_runs_score_component() {
 /// Invoke the `[method]utxo.<name>` ABI method on a live handle, injecting the
 /// resource as the borrowed `self` first parameter.
 fn call_method(
-    handle: &mut Utxo,
+    handle: &mut Utxo<Ctx>,
     methods: &BTreeMap<String, MethodExport>,
     name: &str,
     args: &[Val],
@@ -83,7 +84,7 @@ fn call_method(
 #[test]
 fn drives_score_utxo_resource() {
     let wasm = std::fs::read(build_score()).expect("failed to read built score guest");
-    let contract = Contract::new(wasm).expect("failed to instantiate score contract");
+    let contract = Contract::<Ctx>::new(wasm).expect("failed to instantiate score contract");
 
     // The exported `score-progress` instance owns a `utxo` resource with a
     // `new` constructor and the `Score` ABI methods from `example.star`.
@@ -131,9 +132,9 @@ fn drives_score_utxo_resource() {
         .expect("expected the `utxo` resource to own `storage`")
         .clone();
 
-    // Mint a handle with `new`.
+    // Mint a handle with `new`, passing the store data for its fresh store.
     let mut handle = contract
-        .create_utxo(&new, [])
+        .create_utxo(Ctx, &new, [])
         .expect("calling `new` failed");
 
     // Run the `Score` ABI: chips = 0 + 10; mult = 0 + 4; mult = 4 * 150 / 100 = 6.

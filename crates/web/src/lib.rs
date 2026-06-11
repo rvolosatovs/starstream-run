@@ -33,10 +33,39 @@ use wasm_bindgen::prelude::*;
 // shim below) shadows the crate name.
 use ::wasmtime::component::{Type, Val, types};
 
-use starstream_run::{Utxo, UtxoExport};
+use starstream_run::{Utxo, UtxoExport, bindings};
 
 mod fiber;
 mod wasmtime;
+
+/// Store data for browser-run contracts: the `starstream:std` host-import state.
+///
+/// [`starstream_run::Contract`] is generic over its store-data type, which must
+/// implement [`starstream_run::Host`] (the builtin/cardano host traits plus
+/// [`Default`]). The web UI does not model a host ledger, so these host
+/// functions are stubs that log and return defaults; `tracing` routes the logs
+/// to the on-page panel.
+#[derive(Clone, Copy, Default)]
+struct Ctx;
+
+impl bindings::starstream::std::builtin::Host for Ctx {
+    fn implements_method(&mut self, hash: (u64, u64, u64, u64)) -> ::wasmtime::Result<()> {
+        tracing::error!("called builtin#implements_method {hash:?}");
+        Ok(())
+    }
+}
+
+impl bindings::starstream::std::cardano::Host for Ctx {
+    fn block_height(&mut self) -> i64 {
+        tracing::error!("called cardano#block_height");
+        0
+    }
+
+    fn current_slot(&mut self) -> i64 {
+        tracing::error!("called cardano#current_slot");
+        0
+    }
+}
 
 /// Wire up panic reporting and tracing once, when the module is loaded.
 #[wasm_bindgen(start)]
@@ -66,7 +95,7 @@ fn start() {
 /// methods and `storage` accesses are routed to that handle by id.
 #[wasm_bindgen]
 pub struct Contract {
-    inner: starstream_run::Contract,
+    inner: starstream_run::Contract<Ctx>,
     handles: HashMap<u32, Handle>,
     next_id: u32,
 }
@@ -76,7 +105,7 @@ pub struct Contract {
 /// name the page passes in.
 struct Handle {
     export: UtxoExport,
-    utxo: Utxo,
+    utxo: Utxo<Ctx>,
 }
 
 #[wasm_bindgen]
@@ -156,7 +185,7 @@ impl Contract {
                 .get_utxo_constructor(&utxo, &func)
                 .map_err(err_to_js)?;
             let params = convert_args(ctor.ty().params(), 0, &args).map_err(js_err)?;
-            let new = fiber::run(self.inner.create_utxo_async(&ctor, &params))
+            let new = fiber::run(self.inner.create_utxo_async(Ctx, &ctor, &params))
                 .await?
                 .map_err(err_to_js)?;
             let id = self.next_id;
@@ -220,7 +249,7 @@ impl Contract {
         else {
             return Err(JsError::new("storage value must be a record"));
         };
-        let new = fiber::run(self.inner.load_utxo_async(&storage, fields))
+        let new = fiber::run(self.inner.load_utxo_async(Ctx, &storage, fields))
             .await?
             .map_err(err_to_js)?;
         let id = self.next_id;
@@ -282,7 +311,7 @@ impl Contract {
         else {
             return Err(JsError::new("storage value must be a record"));
         };
-        let new = fiber::run(self.inner.load_utxo_async(&storage, fields))
+        let new = fiber::run(self.inner.load_utxo_async(Ctx, &storage, fields))
             .await?
             .map_err(err_to_js)?;
         let handle = self
@@ -293,14 +322,22 @@ impl Contract {
         Ok(())
     }
 
-    /// Drop a live handle by its id. Dropping its [`Utxo`] (and store) frees the
-    /// guest resource.
+    /// Drop a live handle by its id, running the guest resource's destructor.
+    ///
+    /// Removes the handle from the table and calls
+    /// [`starstream_run::Utxo::drop_async`], which invokes the resource's
+    /// `[dtor]` in the guest before the [`Utxo`] (and its store) are freed. This
+    /// runs guest code, so it is `async` (a `Promise` on the JS side) and driven
+    /// through the JSPI fiber glue like the other guest-invoking methods.
     #[wasm_bindgen(js_name = dropResource)]
-    pub fn drop_resource(&mut self, id: u32) -> Result<(), JsError> {
-        self.handles
+    pub async fn drop_resource(&mut self, id: u32) -> Result<(), JsError> {
+        let handle = self
+            .handles
             .remove(&id)
-            .map(|_| ())
-            .ok_or_else(|| JsError::new("unknown handle"))
+            .ok_or_else(|| JsError::new("unknown handle"))?;
+        fiber::run(handle.utxo.drop_async())
+            .await?
+            .map_err(err_to_js)
     }
 }
 

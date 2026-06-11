@@ -5,6 +5,7 @@ edition.workspace = true
 
 [features]
 async = ["wasmtime/async"]
+trace = ["async"]
 wasmtime-custom-fiber = ["wasmtime/custom-fiber"]
 wasmtime-custom-virtual-memory = ["wasmtime/custom-virtual-memory"]
 
@@ -17,6 +18,7 @@ wasmtime = { workspace = true, features = [
     "anyhow",
     "component-model",
     "cranelift",
+    "debug",
     "runtime",
 ] }
 wit-component = { workspace = true }
