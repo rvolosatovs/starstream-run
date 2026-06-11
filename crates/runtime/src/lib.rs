@@ -556,6 +556,7 @@ impl Contract {
         })
     }
 
+    #[cfg(feature = "async")]
     pub async fn instantiate_utxo_async(
         &self,
         export: &ConstructorExport,
@@ -695,6 +696,7 @@ impl Utxo {
         Ok(results.into_boxed_slice())
     }
 
+    #[cfg(feature = "async")]
     pub async fn call_async(
         &mut self,
         export: &MethodExport,
@@ -731,6 +733,7 @@ impl UtxoStorage<'_> {
         Ok(vs)
     }
 
+    #[cfg(feature = "async")]
     pub async fn get_async(&mut self) -> wasmtime::Result<Vec<(String, wasmtime::component::Val)>> {
         let f = self.utxo.get_function_export(self.get)?;
         let mut results = [wasmtime::component::Val::Bool(false); 1];
@@ -764,6 +767,7 @@ impl UtxoStorage<'_> {
         Ok(())
     }
 
+    #[cfg(feature = "async")]
     pub async fn set_async(
         &mut self,
         fields: impl Into<Vec<(String, wasmtime::component::Val)>>,
