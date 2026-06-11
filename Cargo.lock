@@ -600,6 +600,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67df7112613f8bfd9150013a0314e196f4800d3201ae742489d999db2f979f08"
 dependencies = [
  "cfg-if",
+ "futures-util",
  "once_cell",
  "wasm-bindgen",
 ]
@@ -953,11 +954,13 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "cranelift-codegen",
+ "js-sys",
  "serde_json",
  "starstream-run",
  "tracing",
  "tracing-subscriber",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasmtime",
  "web-sys",
 ]
@@ -1137,6 +1140,16 @@ dependencies = [
  "rustversion",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
+]
+
+[[package]]
+name = "wasm-bindgen-futures"
+version = "0.4.71"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96492d0d3ffba25305a7dc88720d250b1401d7edca02cc3bcd50633b424673b8"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
 ]
 
 [[package]]

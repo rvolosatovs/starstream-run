@@ -11,6 +11,7 @@ anyhow = { version = "1.0.102", default-features = false }
 clap = { version = "4.6.1", default-features = false }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 cranelift-codegen = { git = "https://github.com/rvolosatovs/wasmtime", branch = "feat/custom-fiber", default-features = false }
+js-sys = { version = "0.3.98", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = [
     "derive",
     "alloc",
@@ -23,6 +24,7 @@ tracing = { version = "0.1.44", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false }
 wasi-preview1-component-adapter-provider = { version = "45.0.1", default-features = false }
 wasm-bindgen = { version = "=0.2.121", default-features = false }
+wasm-bindgen-futures = { version = "0.4.71", default-features = false }
 wasmparser = { version = "0.251.0", default-features = false }
 wasmtime = { git = "https://github.com/rvolosatovs/wasmtime", branch = "feat/custom-fiber", default-features = false } # https://github.com/bytecodealliance/wasmtime/pull/13608
 web-sys = { version = "0.3.98", default-features = false }

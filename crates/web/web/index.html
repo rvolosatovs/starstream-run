@@ -258,8 +258,15 @@
       </footer>
     </main>
 
+    <!-- The runtime module imports wasmtime's custom-fiber hooks from the
+         bare module specifier "env" (see crates/web/src/fiber.rs); map it to
+         the JSPI glue. Must precede the module script below. -->
+    <script type="importmap">
+      { "imports": { "env": "./fiber-env.js" } }
+    </script>
     <script type="module">
       import init, { instantiate } from "./pkg/starstream_run_web.js";
+      import { setup as setupFibers } from "env";
 
       const fileInput = document.getElementById("file");
       const drop = document.getElementById("drop");
@@ -416,7 +423,7 @@
         const params = buildParams(func.params, prefix);
         const button = el("button", { type: "button", textContent: "Call" });
 
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
           let args;
           try {
             args = params.read();
@@ -426,7 +433,7 @@
             return;
           }
           try {
-            const raw = contract.call(instanceName, func.export, JSON.stringify(args));
+            const raw = await contract.call(instanceName, func.export, JSON.stringify(args));
             const results = JSON.parse(raw);
             result.className = "result ok";
             result.textContent = results.length ? JSON.stringify(results, null, 2) : "(no return value)";
@@ -527,10 +534,10 @@
         const result = el("div", { className: "result" });
 
         const getBtn = el("button", { type: "button", textContent: "Get" });
-        getBtn.addEventListener("click", () => {
+        getBtn.addEventListener("click", async () => {
           try {
             result.className = "result ok";
-            result.textContent = JSON.stringify(JSON.parse(contract.storageGet(id)), null, 2);
+            result.textContent = JSON.stringify(JSON.parse(await contract.storageGet(id)), null, 2);
           } catch (err) {
             result.className = "result err";
             result.textContent = String(err.message ?? err);
@@ -546,7 +553,7 @@
           ),
         );
         const setBtn = el("button", { type: "button", textContent: "Set" });
-        setBtn.addEventListener("click", () => {
+        setBtn.addEventListener("click", async () => {
           let obj;
           try {
             obj = Object.fromEntries(inputs.map((i) => [i.name, i.input.read()]));
@@ -556,7 +563,7 @@
             return;
           }
           try {
-            contract.storageSet(id, JSON.stringify(obj));
+            await contract.storageSet(id, JSON.stringify(obj));
             result.className = "result ok";
             result.textContent = "(storage set)";
           } catch (err) {
@@ -594,9 +601,11 @@
         });
       });
 
-      // `init()` fetches and instantiates the ~11 MB runtime module, then we
-      // preload the bundled example so the page is usable right away.
+      // `init()` fetches and instantiates the ~11 MB runtime module; its
+      // exports feed the JSPI fiber glue (which guest calls suspend through).
+      // Then preload the bundled example so the page is usable right away.
       init()
+        .then(setupFibers)
         .then(loadDefault)
         .then(() => setStatus("Ready to load score.wasm — or choose another .wasm file."))
         .catch((err) => {

@@ -17,6 +17,11 @@
 //! as a handle, and method/storage calls are routed to that handle. Values
 //! cross the JS boundary as JSON strings, converted to/from
 //! [`wasmtime::component::Val`] against each function's declared type.
+//!
+//! Every method that runs guest code ([`Contract::call`],
+//! [`Contract::storage_get`], [`Contract::storage_set`]) is `async` (a
+//! `Promise` on the JS side): it drives wasmtime's `*_async` APIs, whose
+//! fibers suspend the wasm activation via JSPI — see [`fiber`].
 
 use std::collections::HashMap;
 use std::io;
@@ -30,6 +35,7 @@ use ::wasmtime::component::{Type, Val, types};
 
 use starstream_run::{Utxo, UtxoExport};
 
+mod fiber;
 mod wasmtime;
 
 /// Wire up panic reporting and tracing once, when the module is loaded.
@@ -134,20 +140,24 @@ impl Contract {
     /// as the first entry of the `args_json` array (`{"$handle": id}`); the
     /// remaining entries are the method's parameters. Returns a JSON array of
     /// results.
-    pub fn call(&mut self, instance: &str, func: &str, args_json: &str) -> Result<String, JsError> {
+    pub async fn call(
+        &mut self,
+        instance: String,
+        func: String,
+        args_json: String,
+    ) -> Result<String, JsError> {
         let args: Vec<Value> =
-            serde_json::from_str(args_json).map_err(|err| JsError::new(&err.to_string()))?;
-        let utxo = self.inner.get_utxo(instance).map_err(err_to_js)?;
+            serde_json::from_str(&args_json).map_err(|err| JsError::new(&err.to_string()))?;
+        let utxo = self.inner.get_utxo(&instance).map_err(err_to_js)?;
 
         if func.starts_with("[static]") {
             let ctor = self
                 .inner
-                .get_utxo_constructor(&utxo, func)
+                .get_utxo_constructor(&utxo, &func)
                 .map_err(err_to_js)?;
             let params = convert_args(ctor.ty().params(), 0, &args).map_err(js_err)?;
-            let new = self
-                .inner
-                .instantiate_utxo(&ctor, &params)
+            let new = fiber::run(self.inner.instantiate_utxo_async(&ctor, &params))
+                .await?
                 .map_err(err_to_js)?;
             let id = self.next_id;
             self.next_id += 1;
@@ -161,7 +171,10 @@ impl Contract {
             return Ok(json!([{ "$handle": id }]).to_string());
         }
 
-        let method = self.inner.get_utxo_method(&utxo, func).map_err(err_to_js)?;
+        let method = self
+            .inner
+            .get_utxo_method(&utxo, &func)
+            .map_err(err_to_js)?;
         let id = handle_id(args.first())
             .ok_or_else(|| JsError::new("a method call needs a `$handle` as its first argument"))?;
         let params = convert_args(method.ty().params(), 1, &args[1..]).map_err(js_err)?;
@@ -174,14 +187,16 @@ impl Contract {
         full.push(Val::Resource(handle.utxo.resource()));
         full.extend(params);
 
-        let results = handle.utxo.call(&method, &full).map_err(err_to_js)?;
+        let results = fiber::run(handle.utxo.call_async(&method, &full))
+            .await?
+            .map_err(err_to_js)?;
         let results: Vec<Value> = results.iter().map(val_to_json).collect();
         serde_json::to_string(&results).map_err(|err| JsError::new(&err.to_string()))
     }
 
     /// Read a handle's `storage` record as a JSON object.
     #[wasm_bindgen(js_name = storageGet)]
-    pub fn storage_get(&mut self, id: u32) -> Result<String, JsError> {
+    pub async fn storage_get(&mut self, id: u32) -> Result<String, JsError> {
         let handle = self
             .handles
             .get_mut(&id)
@@ -191,7 +206,8 @@ impl Contract {
             .storage()
             .cloned()
             .ok_or_else(|| JsError::new("this resource has no storage"))?;
-        let fields = handle.utxo.storage(&storage).get().map_err(err_to_js)?;
+        let mut storage = handle.utxo.storage(&storage);
+        let fields = fiber::run(storage.get_async()).await?.map_err(err_to_js)?;
         let obj: Map<String, Value> = fields
             .iter()
             .map(|(name, val)| (name.clone(), val_to_json(val)))
@@ -201,9 +217,9 @@ impl Contract {
 
     /// Overwrite a handle's `storage` record from a JSON object.
     #[wasm_bindgen(js_name = storageSet)]
-    pub fn storage_set(&mut self, id: u32, value_json: &str) -> Result<(), JsError> {
+    pub async fn storage_set(&mut self, id: u32, value_json: String) -> Result<(), JsError> {
         let value: Value =
-            serde_json::from_str(value_json).map_err(|err| JsError::new(&err.to_string()))?;
+            serde_json::from_str(&value_json).map_err(|err| JsError::new(&err.to_string()))?;
         let handle = self
             .handles
             .get_mut(&id)
@@ -218,10 +234,9 @@ impl Contract {
         else {
             return Err(JsError::new("storage value must be a record"));
         };
-        handle
-            .utxo
-            .storage(&storage)
-            .set(fields)
+        let mut storage = handle.utxo.storage(&storage);
+        fiber::run(storage.set_async(fields))
+            .await?
             .map_err(err_to_js)?;
         Ok(())
     }

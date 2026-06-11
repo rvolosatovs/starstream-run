@@ -11,6 +11,12 @@
 //!   * "mprotect" is a no-op (Pulley bytecode is interpreted *data*, never
 //!     executed as native code, so W^X is irrelevant), and
 //!   * copy-on-write memory images are disabled (we return "no image").
+//!
+//! The `custom-fiber` stack-switching hooks (`wasmtime_fiber_init` /
+//! `wasmtime_fiber_switch`) are deliberately *not* defined here: a wasm32
+//! program cannot switch its own stack, so they must stay unresolved — they
+//! surface as imports from the `env` module, satisfied by the JSPI glue in
+//! `web/fiber-env.js`. See [`crate::fiber`].
 
 use core::ffi::c_void;
 use core::ptr;
@@ -120,17 +126,3 @@ pub unsafe extern "C" fn wasmtime_memory_image_map_at(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasmtime_memory_image_free(_image: *mut c_void) {}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn wasmtime_fiber_init(
-    top_of_stack: *mut u8,
-    entry: extern "C" fn(*mut u8, *mut u8) -> *mut u8,
-    entry_arg0: *mut u8,
-) {
-    todo!("wasmtime_fiber_init {top_of_stack:?} {entry:?} {entry_arg0:?}")
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn wasmtime_fiber_switch(top_of_stack: *mut u8) {
-    todo!("wasmtime_fiber_switch {top_of_stack:?}")
-}
