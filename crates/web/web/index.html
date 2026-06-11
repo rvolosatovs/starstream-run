@@ -57,6 +57,34 @@
         cursor: pointer;
       }
       button:disabled { opacity: 0.5; cursor: default; }
+      #cardano {
+        margin-top: 1.25rem;
+        border: 1px solid #3f3f46;
+        border-radius: 10px;
+        padding: 0.75rem 1.25rem 1rem;
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+      }
+      #cardano > legend {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        padding: 0 0.4rem;
+      }
+      #cardano .field { gap: 0.25rem; }
+      #cardano label { font-size: 0.8rem; color: var(--muted); }
+      #cardano input {
+        font: inherit;
+        font-size: 0.9rem;
+        color: var(--fg);
+        background: var(--bg);
+        border: 1px solid #3f3f46;
+        border-radius: 6px;
+        padding: 0.3rem 0.45rem;
+        width: 10rem;
+      }
       .status { margin-top: 1.25rem; min-height: 1.5rem; }
       .status.ok { color: var(--ok); }
       .status.err { color: var(--err); }
@@ -237,6 +265,18 @@
         Defaults to the bundled <code>score.wasm</code> example contract.
       </p>
 
+      <fieldset id="cardano">
+        <legend>Cardano context</legend>
+        <div class="field">
+          <label for="block-height">block height</label>
+          <input type="number" id="block-height" step="1" min="0" value="0" />
+        </div>
+        <div class="field">
+          <label for="current-slot">current slot</label>
+          <input type="number" id="current-slot" step="1" min="0" value="0" />
+        </div>
+      </fieldset>
+
       <div>
         <button id="run" disabled>Load &amp; inspect</button>
       </div>
@@ -276,6 +316,25 @@
       const output = document.getElementById("output");
       const log = document.getElementById("log");
       const contractEl = document.getElementById("contract");
+      const blockHeightInput = document.getElementById("block-height");
+      const currentSlotInput = document.getElementById("current-slot");
+
+      // Cardano context (`s64` host functions) reported to guests. Read the two
+      // form fields, defaulting blanks to 0, and push them into the live
+      // contract; `setCardano` takes `i64`, so values cross as BigInt. Applied
+      // to UTXOs minted after the call.
+      function applyCardano() {
+        if (!contract) return;
+        const read = (input) => {
+          const v = input.value.trim();
+          return BigInt(v === "" ? 0 : Math.trunc(Number(v)));
+        };
+        contract.setCardano(read(blockHeightInput), read(currentSlotInput));
+      }
+
+      for (const input of [blockHeightInput, currentSlotInput]) {
+        input.addEventListener("change", applyCardano);
+      }
 
       function clearLog() {
         log.textContent = "";
@@ -639,6 +698,7 @@
         requestAnimationFrame(() => {
           try {
             contract = instantiate(bytes);
+            applyCardano();
             const api = JSON.parse(contract.describe());
             renderContract(api);
             setStatus("Instantiated. Interact with the contract below.", "ok");

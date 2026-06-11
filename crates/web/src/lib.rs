@@ -38,15 +38,22 @@ use starstream_run::{Utxo, UtxoExport, bindings};
 mod fiber;
 mod wasmtime;
 
-/// Store data for browser-run contracts: the `starstream:std` host-import state.
-///
-/// [`starstream_run::Contract`] is generic over its store-data type, which must
-/// implement [`starstream_run::Host`] (the builtin/cardano host traits plus
-/// [`Default`]). The web UI does not model a host ledger, so these host
-/// functions are stubs that log and return defaults; `tracing` routes the logs
-/// to the on-page panel.
+/// The Cardano context a contract can observe via the `starstream:std/cardano`
+/// host functions, configured from the page's Cardano form (defaulting to 0).
 #[derive(Clone, Copy, Default)]
-struct Ctx;
+struct CardanoCtx {
+    /// Block height reported to the guest via `cardano#block-height`.
+    block_height: i64,
+    /// Current slot reported to the guest via `cardano#current-slot`.
+    current_slot: i64,
+}
+
+/// Store data for browser-run contracts. The web UI does not model a host
+/// ledger, so this only carries the [`CardanoCtx`] the page configures.
+#[derive(Clone, Copy, Default)]
+struct Ctx {
+    cardano: CardanoCtx,
+}
 
 impl bindings::starstream::std::builtin::Host for Ctx {
     fn implements_method(&mut self, hash: (u64, u64, u64, u64)) -> ::wasmtime::Result<()> {
@@ -57,13 +64,11 @@ impl bindings::starstream::std::builtin::Host for Ctx {
 
 impl bindings::starstream::std::cardano::Host for Ctx {
     fn block_height(&mut self) -> i64 {
-        tracing::error!("called cardano#block_height");
-        0
+        self.cardano.block_height
     }
 
     fn current_slot(&mut self) -> i64 {
-        tracing::error!("called cardano#current_slot");
-        0
+        self.cardano.current_slot
     }
 }
 
@@ -98,6 +103,9 @@ pub struct Contract {
     inner: starstream_run::Contract<Ctx>,
     handles: HashMap<u32, Handle>,
     next_id: u32,
+    /// The Cardano context seeded into every freshly minted [`Utxo`]'s store
+    /// (see [`Contract::set_cardano`]). Each instantiation copies this in.
+    cardano: CardanoCtx,
 }
 
 /// A live `utxo` handle: the instantiated [`Utxo`] and the export it came from
@@ -185,7 +193,10 @@ impl Contract {
                 .get_utxo_constructor(&utxo, &func)
                 .map_err(err_to_js)?;
             let params = convert_args(ctor.ty().params(), 0, &args).map_err(js_err)?;
-            let new = fiber::run(self.inner.create_utxo_async(Ctx, &ctor, &params))
+            let ctx = Ctx {
+                cardano: self.cardano,
+            };
+            let new = fiber::run(self.inner.create_utxo_async(ctx, &ctor, &params))
                 .await?
                 .map_err(err_to_js)?;
             let id = self.next_id;
@@ -249,7 +260,10 @@ impl Contract {
         else {
             return Err(JsError::new("storage value must be a record"));
         };
-        let new = fiber::run(self.inner.load_utxo_async(Ctx, &storage, fields))
+        let ctx = Ctx {
+            cardano: self.cardano,
+        };
+        let new = fiber::run(self.inner.load_utxo_async(ctx, &storage, fields))
             .await?
             .map_err(err_to_js)?;
         let id = self.next_id;
@@ -311,7 +325,10 @@ impl Contract {
         else {
             return Err(JsError::new("storage value must be a record"));
         };
-        let new = fiber::run(self.inner.load_utxo_async(Ctx, &storage, fields))
+        let ctx = Ctx {
+            cardano: self.cardano,
+        };
+        let new = fiber::run(self.inner.load_utxo_async(ctx, &storage, fields))
             .await?
             .map_err(err_to_js)?;
         let handle = self
@@ -339,6 +356,17 @@ impl Contract {
             .await?
             .map_err(err_to_js)
     }
+
+    /// Set the Cardano context (`cardano#block-height` / `cardano#current-slot`)
+    /// reported to guests. Applies to UTXOs minted *after* this call; existing
+    /// handles keep the context they were instantiated with.
+    #[wasm_bindgen(js_name = setCardano)]
+    pub fn set_cardano(&mut self, block_height: i64, current_slot: i64) {
+        self.cardano = CardanoCtx {
+            block_height,
+            current_slot,
+        };
+    }
 }
 
 /// Load and link an uploaded contract for interactive use.
@@ -352,6 +380,7 @@ pub fn instantiate(component: &[u8]) -> Result<Contract, JsError> {
         inner,
         handles: HashMap::new(),
         next_id: 0,
+        cardano: CardanoCtx::default(),
     })
 }
 
