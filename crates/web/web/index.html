@@ -187,7 +187,7 @@
       .result.err { color: var(--err); }
       .result.ok { color: var(--ok); }
       .handles:empty::before {
-        content: "None yet — call a constructor above.";
+        content: "None yet — call a constructor or load from storage above.";
         color: var(--muted);
         font-style: italic;
         font-size: 0.85rem;
@@ -477,10 +477,16 @@
             handlesEl.append(renderHandle(instance, id));
           };
 
-          if (instance.constructors.length) {
+          // A UTXO can be minted two ways: by calling a `[static]` constructor,
+          // or by loading a `storage` record (the `set-storage` export). Both
+          // produce a fresh handle.
+          if (instance.constructors.length || instance.storage) {
             resNode.append(el("p", { className: "subhead", textContent: "Construct" }));
             for (const func of instance.constructors) {
               resNode.append(renderFunc(instance.name, func, () => [], addHandle));
+            }
+            if (instance.storage) {
+              resNode.append(renderLoadFromStorage(instance, addHandle));
             }
           }
 
@@ -489,6 +495,47 @@
           instNode.append(resNode);
           contractEl.append(instNode);
         }
+      }
+
+      // Render a "from storage" constructor panel: one scalar input per storage
+      // field plus a Load button that mints a fresh handle via `loadUtxo`.
+      function renderLoadFromStorage(instance, onResult) {
+        const result = el("div", { className: "result" });
+        const inputs = instance.storage.map((f) => ({ name: f.name, input: buildInput(f.kind) }));
+        const form = el(
+          "div",
+          { className: "params" },
+          inputs.map(({ name, input }) =>
+            el("div", { className: "field" }, [el("label", { textContent: name }), input.node]),
+          ),
+        );
+        const button = el("button", { type: "button", textContent: "Load" });
+        button.addEventListener("click", async () => {
+          let obj;
+          try {
+            obj = Object.fromEntries(inputs.map((i) => [i.name, i.input.read()]));
+          } catch (err) {
+            result.className = "result err";
+            result.textContent = `Invalid input: ${err.message ?? err}`;
+            return;
+          }
+          try {
+            const raw = await contract.loadUtxo(instance.name, JSON.stringify(obj));
+            const results = JSON.parse(raw);
+            result.className = "result ok";
+            result.textContent = "(loaded from storage)";
+            for (const id of collectHandles(results, [])) onResult(id);
+          } catch (err) {
+            result.className = "result err";
+            result.textContent = String(err.message ?? err);
+          }
+        });
+
+        return el("div", { className: "func" }, [
+          el("div", { className: "func-head" }, [el("span", { className: "func-name", textContent: "from storage" }), button]),
+          form,
+          result,
+        ]);
       }
 
       // Render a single live handle card: one panel per method, plus a storage

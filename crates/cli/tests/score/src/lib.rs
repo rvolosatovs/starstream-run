@@ -30,8 +30,12 @@ impl Guest for Component {
         utxo.get::<Self::Utxo>().storage.borrow().clone()
     }
 
-    fn set_storage(utxo: UtxoBorrow, storage: Storage) {
-        *utxo.get::<Self::Utxo>().storage.borrow_mut() = storage;
+    /// `set-storage` reconstructs a `utxo` from a stored `storage` record,
+    /// minting a fresh handle (it does not mutate an existing one).
+    fn set_storage(storage: Storage) -> Utxo {
+        Utxo::new(ScoreUtxo {
+            storage: RefCell::new(storage),
+        })
     }
 }
 

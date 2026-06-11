@@ -156,7 +156,7 @@ impl Contract {
                 .get_utxo_constructor(&utxo, &func)
                 .map_err(err_to_js)?;
             let params = convert_args(ctor.ty().params(), 0, &args).map_err(js_err)?;
-            let new = fiber::run(self.inner.instantiate_utxo_async(&ctor, &params))
+            let new = fiber::run(self.inner.create_utxo_async(&ctor, &params))
                 .await?
                 .map_err(err_to_js)?;
             let id = self.next_id;
@@ -194,6 +194,47 @@ impl Contract {
         serde_json::to_string(&results).map_err(|err| JsError::new(&err.to_string()))
     }
 
+    /// Mint a fresh handle by *loading* a `storage` record into a new `utxo`,
+    /// instead of calling a `[static]` constructor.
+    ///
+    /// `storage_json` is a JSON object of the instance's `storage` fields; it is
+    /// lowered against the storage type and passed to the `set-storage` export
+    /// (which returns `own<utxo>`) via [`starstream_run::Contract::load_utxo_async`].
+    /// Returns `[{"$handle": id}]`, matching [`Contract::call`]'s constructor
+    /// branch, so the page records the new handle the same way.
+    #[wasm_bindgen(js_name = loadUtxo)]
+    pub async fn load_utxo(
+        &mut self,
+        instance: String,
+        storage_json: String,
+    ) -> Result<String, JsError> {
+        let value: Value =
+            serde_json::from_str(&storage_json).map_err(|err| JsError::new(&err.to_string()))?;
+        let utxo = self.inner.get_utxo(&instance).map_err(err_to_js)?;
+        let storage = utxo
+            .storage()
+            .cloned()
+            .ok_or_else(|| JsError::new("this resource has no storage"))?;
+        let Val::Record(fields) =
+            json_to_val(&Type::Record(storage.ty().clone()), &value).map_err(js_err)?
+        else {
+            return Err(JsError::new("storage value must be a record"));
+        };
+        let new = fiber::run(self.inner.load_utxo_async(&storage, fields))
+            .await?
+            .map_err(err_to_js)?;
+        let id = self.next_id;
+        self.next_id += 1;
+        self.handles.insert(
+            id,
+            Handle {
+                export: utxo,
+                utxo: new,
+            },
+        );
+        Ok(json!([{ "$handle": id }]).to_string())
+    }
+
     /// Read a handle's `storage` record as a JSON object.
     #[wasm_bindgen(js_name = storageGet)]
     pub async fn storage_get(&mut self, id: u32) -> Result<String, JsError> {
@@ -215,29 +256,40 @@ impl Contract {
         Ok(Value::Object(obj).to_string())
     }
 
-    /// Overwrite a handle's `storage` record from a JSON object.
+    /// Set a handle's `storage` from a JSON object.
+    ///
+    /// `set-storage` doesn't mutate in place — it mints a fresh `utxo` from the
+    /// given `storage` record. We reconstruct via [`starstream_run::Contract::load_utxo_async`]
+    /// and swap the freshly loaded [`Utxo`] into the handle, so subsequent
+    /// `storageGet`/method calls observe the new storage.
     #[wasm_bindgen(js_name = storageSet)]
     pub async fn storage_set(&mut self, id: u32, value_json: String) -> Result<(), JsError> {
         let value: Value =
             serde_json::from_str(&value_json).map_err(|err| JsError::new(&err.to_string()))?;
-        let handle = self
-            .handles
-            .get_mut(&id)
-            .ok_or_else(|| JsError::new("unknown handle"))?;
-        let storage = handle
-            .export
-            .storage()
-            .cloned()
-            .ok_or_else(|| JsError::new("this resource has no storage"))?;
+        let storage = {
+            let handle = self
+                .handles
+                .get(&id)
+                .ok_or_else(|| JsError::new("unknown handle"))?;
+            handle
+                .export
+                .storage()
+                .cloned()
+                .ok_or_else(|| JsError::new("this resource has no storage"))?
+        };
         let Val::Record(fields) =
             json_to_val(&Type::Record(storage.ty().clone()), &value).map_err(js_err)?
         else {
             return Err(JsError::new("storage value must be a record"));
         };
-        let mut storage = handle.utxo.storage(&storage);
-        fiber::run(storage.set_async(fields))
+        let new = fiber::run(self.inner.load_utxo_async(&storage, fields))
             .await?
             .map_err(err_to_js)?;
+        let handle = self
+            .handles
+            .get_mut(&id)
+            .ok_or_else(|| JsError::new("unknown handle"))?;
+        handle.utxo = new;
         Ok(())
     }
 

@@ -10,8 +10,8 @@ interface score-progress {
       mult: u64,
     }
 
-    get-storage: func(utxo: borrow<utxo>) -> storage;
-    set-storage: func(utxo: borrow<utxo>, storage: storage);
+    get-storage: func(self: borrow<utxo>) -> storage;
+    set-storage: func(storage: storage) -> utxo;
 
     resource utxo {
         new: static func() -> utxo;

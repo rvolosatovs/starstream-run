@@ -133,7 +133,7 @@ fn drives_score_utxo_resource() {
 
     // Mint a handle with `new`.
     let mut handle = contract
-        .instantiate_utxo(&new, [])
+        .create_utxo(&new, [])
         .expect("calling `new` failed");
 
     // Run the `Score` ABI: chips = 0 + 10; mult = 0 + 4; mult = 4 * 150 / 100 = 6.
