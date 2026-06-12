@@ -25,5 +25,8 @@ interface score-progress {
 
 world root {
     import score;
+    // The Starstream compiler emits `implements-method` calls from a UTXO's
+    // constructor to declare the ABI methods it implements; mirror that here.
+    import starstream:std/builtin;
     export score-progress;
 }

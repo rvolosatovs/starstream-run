@@ -23,21 +23,27 @@
 //! drives wasmtime's `*_async` APIs, whose fibers suspend the wasm activation
 //! via JSPI — see [`fiber`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use tracing_subscriber::fmt::MakeWriter;
 use wasm_bindgen::prelude::*;
 // Spelled with a leading `::` because the local `mod wasmtime` (the platform
 // shim below) shadows the crate name.
+use ::wasmtime::AsContext as _;
 use ::wasmtime::component::{Type, Val, types};
 
 use starstream_run::{Utxo, UtxoExport, bindings};
 
 mod fiber;
 mod wasmtime;
+
+/// The 256-bit method identity a contract declares via `implements-method`,
+/// carried as the four `u64` words wasmtime hands us from the guest.
+type MethodHash = (u64, u64, u64, u64);
 
 /// The Cardano context a contract can observe via the `starstream:std/cardano`
 /// host functions, configured from the page's Cardano form (defaulting to 0).
@@ -56,15 +62,24 @@ struct CardanoCtx {
 /// `events` is an `Arc<Mutex<…>>` shared with the owning [`Contract`] (and every
 /// UTXO's store), so emissions from any instantiation accumulate in one place;
 /// [`Contract::drain_events`] hands them to the page for display.
+///
+/// `implemented` is **per-instantiation** (not shared): each freshly minted
+/// UTXO's store starts with an empty set and the guest's constructor populates
+/// it by calling `implements-method`. A method is only callable once its hash
+/// appears here — see [`Contract::call`] / [`method_hash`].
 #[derive(Clone, Default)]
 struct Ctx {
     cardano: CardanoCtx,
     events: Arc<Mutex<Vec<Value>>>,
+    implemented: HashSet<MethodHash>,
 }
 
 impl bindings::starstream::std::builtin::Host for Ctx {
-    fn implements_method(&mut self, hash: (u64, u64, u64, u64)) -> ::wasmtime::Result<()> {
-        tracing::error!("called builtin#implements_method {hash:?}");
+    /// The guest declares a method it implements by its 256-bit hash; record it
+    /// so [`Contract::call`] can gate method invocations on it.
+    fn implements_method(&mut self, hash: MethodHash) -> ::wasmtime::Result<()> {
+        tracing::debug!("implements-method {hash:?}");
+        self.implemented.insert(hash);
         Ok(())
     }
 }
@@ -217,6 +232,7 @@ impl Contract {
             let ctx = Ctx {
                 cardano: self.cardano,
                 events: Arc::clone(&self.events),
+                implemented: HashSet::new(),
             };
             let new = fiber::run(self.inner.create_utxo_async(ctx, &ctor, &params))
                 .await?
@@ -245,6 +261,16 @@ impl Contract {
             .handles
             .get_mut(&id)
             .ok_or_else(|| JsError::new("unknown handle"))?;
+        // Gate: the method is only callable if this UTXO declared its hash via
+        // `implements-method` (recorded in its store's `Ctx` during the guest
+        // constructor). The declared set lives in the live store, so read it
+        // back through the UTXO's context.
+        let hash = method_hash(&func);
+        if !handle.utxo.as_context().data().implemented.contains(&hash) {
+            return Err(JsError::new(&format!(
+                "method `{func}` is not callable: this UTXO did not declare it via `implements-method`"
+            )));
+        }
         let mut full = Vec::with_capacity(params.len() + 1);
         full.push(Val::Resource(handle.utxo.resource()));
         full.extend(params);
@@ -285,6 +311,7 @@ impl Contract {
         let ctx = Ctx {
             cardano: self.cardano,
             events: Arc::clone(&self.events),
+            implemented: HashSet::new(),
         };
         let new = fiber::run(self.inner.load_utxo_async(ctx, &storage, fields))
             .await?
@@ -340,6 +367,26 @@ impl Contract {
             .map_err(err_to_js)
     }
 
+    /// The export names of the methods this live UTXO has declared callable via
+    /// `implements-method`, as a JSON array. The page uses it to enable only the
+    /// declared methods in the invocation panel; a method not in this list is
+    /// rejected by [`Contract::call`].
+    #[wasm_bindgen(js_name = implementedMethods)]
+    pub fn implemented_methods(&self, id: u32) -> Result<String, JsError> {
+        let handle = self
+            .handles
+            .get(&id)
+            .ok_or_else(|| JsError::new("unknown handle"))?;
+        let declared = handle.utxo.as_context().data().implemented.clone();
+        let names: Vec<&str> = self
+            .inner
+            .utxo_methods(&handle.export)
+            .filter_map(|(name, method)| method.ok().map(|_| name))
+            .filter(|name| declared.contains(&method_hash(name)))
+            .collect();
+        serde_json::to_string(&names).map_err(|err| JsError::new(&err.to_string()))
+    }
+
     /// Drain the ABI events emitted since the last drain, as a JSON array of
     /// `{ instance, name, params }` (newest last). The page shows these in the
     /// invocation panel's log instead of routing them through the trace log.
@@ -390,6 +437,30 @@ fn func_json(export: &str, ty: &types::ComponentFunc, skip: usize) -> Value {
     // Export names look like `[static]utxo.new` / `[method]utxo.plus-chips`.
     let label = export.rsplit('.').next().unwrap_or(export);
     json!({ "export": export, "label": label, "params": params })
+}
+
+/// The hash a contract declares for `export` via `implements-method`.
+///
+/// The Starstream compiler identifies each method by `sha256` of its source
+/// name (`snake_case`), split into four little-endian `u64` words — verified
+/// against `example.wasm`. An exported method is named `[method]utxo.plus-chips`
+/// in WIT (`kebab-case`); we take the trailing segment and undo the
+/// `kebab-case` mangling (`-` → `_`) to recover the name the compiler hashed.
+fn method_hash(export: &str) -> MethodHash {
+    let name = export
+        .rsplit('.')
+        .next()
+        .unwrap_or(export)
+        .replace('-', "_");
+    let digest = Sha256::digest(name.as_bytes());
+    let word = |i: usize| {
+        u64::from_le_bytes(
+            digest[i * 8..i * 8 + 8]
+                .try_into()
+                .expect("a sha256 digest is 32 bytes"),
+        )
+    };
+    (word(0), word(1), word(2), word(3))
 }
 
 /// A short, JS-friendly tag for a parameter/field type. Anything that isn't a

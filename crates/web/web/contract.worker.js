@@ -39,6 +39,7 @@ const ops = {
   call: ({ instance, func, args }) => contract.call(instance, func, args),
   loadUtxo: ({ instance, storage }) => contract.loadUtxo(instance, storage),
   storageGet: ({ handle }) => contract.storageGet(handle),
+  implementedMethods: ({ handle }) => contract.implementedMethods(handle),
   dropResource: ({ handle }) => contract.dropResource(handle),
   setCardano: ({ blockHeight, currentSlot }) =>
     void contract.setCardano(blockHeight, currentSlot),

@@ -399,8 +399,10 @@
         <code>&lt;instance&gt; #&lt;n&gt;</code>). Then use the single
         <strong>Invoke</strong> panel at the top — pick a contract, pick one of
         its live UTXOs, and call that UTXO's methods; return values and emitted
-        events stream into that panel's log. Per-contract trace logs appear at
-        the bottom of each card.
+        events stream into that panel's log. A method is only callable once the
+        UTXO has declared it via <code>implements-method</code> during its
+        constructor — methods it has not declared are shown disabled.
+        Per-contract trace logs appear at the bottom of each card.
       </footer>
     </main>
 
@@ -476,6 +478,7 @@
         call(instance, func, args) { return this.#rpc("call", { instance, func, args }); }
         loadUtxo(instance, storage) { return this.#rpc("loadUtxo", { instance, storage }); }
         storageGet(handle) { return this.#rpc("storageGet", { handle }); }
+        implementedMethods(handle) { return this.#rpc("implementedMethods", { handle }); }
         dropResource(handle) { return this.#rpc("dropResource", { handle }); }
         setCardano(blockHeight, currentSlot) {
           return this.#rpc("setCardano", { blockHeight, currentSlot });
@@ -733,7 +736,7 @@
           registry.notifyLog();
         };
 
-        const renderMethods = () => {
+        const renderMethods = async () => {
           methodsEl.replaceChildren();
           const c = currentContract();
           const handle = currentHandle();
@@ -752,10 +755,30 @@
             methodsEl.append(el("p", { className: "subhead", textContent: "(this UTXO has no methods)" }));
             return;
           }
+          // A method is only callable once the UTXO declared it via
+          // `implements-method` during its constructor. Query that set and
+          // enable only the declared methods; on error, leave them all enabled
+          // and let a rejected call surface in the log.
+          let implemented = null;
+          try {
+            implemented = new Set(JSON.parse(await c.cx.implementedMethods(handle.id)));
+          } catch {
+            implemented = null;
+          }
+          // The selection may have changed while awaiting — bail if so, since a
+          // newer render is already in flight for the current UTXO.
+          if (currentHandle() !== handle) return;
           for (const func of handle.instance.methods) {
-            methodsEl.append(
-              renderFunc(c.cx, handle.instance.name, func, () => [{ $handle: handle.id }], undefined, handle.refresh, logResult(c)),
-            );
+            const node = renderFunc(c.cx, handle.instance.name, func, () => [{ $handle: handle.id }], undefined, handle.refresh, logResult(c));
+            if (implemented && !implemented.has(func.export)) {
+              const btn = node.querySelector("button");
+              if (btn) {
+                btn.disabled = true;
+                btn.title = "not declared via implements-method";
+              }
+              node.append(el("div", { className: "result", textContent: "Not declared via implements-method — not callable." }));
+            }
+            methodsEl.append(node);
           }
         };
 

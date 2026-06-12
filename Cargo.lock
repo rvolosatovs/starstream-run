@@ -956,6 +956,7 @@ dependencies = [
  "cranelift-codegen",
  "js-sys",
  "serde_json",
+ "sha2",
  "starstream-run",
  "tracing",
  "tracing-subscriber",
