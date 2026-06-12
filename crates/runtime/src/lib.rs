@@ -576,6 +576,7 @@ impl<T: Host> Contract<T> {
         {
             use core::marker::PhantomData;
 
+            use tracing::{error, trace};
             use wasmtime::DebugEvent;
 
             struct DebugHandler<T>(PhantomData<fn() -> T>);
@@ -591,12 +592,19 @@ impl<T: Host> Contract<T> {
 
                 async fn handle(
                     &self,
-                    _store: StoreContextMut<'_, Self::Data>,
+                    mut store: StoreContextMut<'_, Self::Data>,
                     event: DebugEvent<'_>,
                 ) {
                     match event {
                         DebugEvent::Breakpoint => {
-                            info!("breakpoint");
+                            let frames: Vec<_> = store.debug_exit_frames().collect();
+                            for frame in frames {
+                                match frame.wasm_function_index_and_pc(&mut store) {
+                                    Ok(Some((f, pc))) => debug!(?f, ?pc, "frame"),
+                                    Ok(None) => trace!("skip trampoline frame"),
+                                    Err(err) => error!(?err),
+                                }
+                            }
                         }
                         DebugEvent::HostcallError(..)
                         | DebugEvent::Exception(..)
