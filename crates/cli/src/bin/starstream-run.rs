@@ -80,6 +80,68 @@ fn parse_vals<'a>(
         .collect()
 }
 
+/// Render a component-model [`Type`] as WIT. `wasm_wave`'s `DisplayType` covers
+/// the structural types but renders resource handles as `<<UNSUPPORTED>>`; the
+/// `utxo` resource is the only one in play here, so spell its handles by name.
+fn wit_type(ty: &Type) -> String {
+    match ty {
+        Type::Own(_) => "utxo".into(),
+        Type::Borrow(_) => "borrow<utxo>".into(),
+        ty => wasm_wave::wasm::DisplayType(ty).to_string(),
+    }
+}
+
+/// Render a `[method]utxo.<name>` export as a WIT function declaration: the
+/// trailing `<name>` segment and its params (the leading implicit
+/// `self: borrow<utxo>` receiver dropped) and results.
+fn wit_func(export: &str, ty: &wasmtime::component::types::ComponentFunc) -> String {
+    let name = export.rsplit('.').next().unwrap_or(export);
+    let params = ty
+        .params()
+        .skip(1) // the implicit `self` receiver
+        .map(|(n, t)| format!("{n}: {}", wit_type(&t)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let results: Vec<_> = ty.results().collect();
+    let ret = match results.as_slice() {
+        [] => String::new(),
+        [t] => format!(" -> {}", wit_type(t)),
+        types => format!(
+            " -> ({})",
+            types.iter().map(wit_type).collect::<Vec<_>>().join(", "),
+        ),
+    };
+    format!("{name}: func({params}){ret};")
+}
+
+/// Print the methods this instantiation declared via `implements-method` as a
+/// self-contained WIT document: an interface (named by the export's interface
+/// id) of the methods as free functions.
+fn print_wit(
+    contract: &Contract<Ctx>,
+    name: &str,
+    export: &starstream_run::UtxoExport,
+    implemented: &std::collections::HashSet<starstream_run_cli::MethodHash>,
+) -> anyhow::Result<()> {
+    // A UTXO's methods live in the `starstream:utxo` package by convention,
+    // regardless of the package the guest's component happens to declare. Take
+    // just the interface segment of the export id (`ns:pkg/iface@ver` → `iface`).
+    let iface = name.rsplit_once('/').map_or(name, |(_, iface)| iface);
+    let iface = iface.split_once('@').map_or(iface, |(iface, _)| iface);
+
+    println!("package starstream:utxo;\n");
+    println!("interface {iface} {{");
+    for (name, method) in contract.utxo_methods(export) {
+        let method = method?;
+        // Only advertise methods this instantiation declared it implements.
+        if implemented.contains(&method_hash(name)) {
+            println!("    {}", wit_func(name, method.ty()));
+        }
+    }
+    println!("}}");
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let Args {
         cardano_block_height,
@@ -104,9 +166,12 @@ fn main() -> anyhow::Result<()> {
     let contract = Contract::<Ctx>::new(wasm)?;
 
     // Resolve the exported instance owning the `utxo` resource: by name if
-    // given, otherwise the contract's only one.
-    let export = if let Some(name) = utxo {
-        contract.get_utxo(&name)?
+    // given, otherwise the contract's only one. Keep the instance's export name
+    // — it is the fully-qualified WIT interface id (e.g.
+    // `starstream:utxo/score-progress`) we render the interface under.
+    let (export_name, export) = if let Some(name) = utxo {
+        let export = contract.get_utxo(&name)?;
+        (name, export)
     } else {
         let mut utxos = contract.utxos();
         let Some((name, utxo)) = utxos.next() else {
@@ -118,7 +183,7 @@ fn main() -> anyhow::Result<()> {
             "contract exports multiple instances owning a `utxo` resource (`{name}`, `{}`); select one with `--utxo`",
             rest.join("`, `"),
         );
-        utxo?
+        (name.to_string(), utxo?)
     };
 
     let cardano = CardanoCtx {
@@ -176,20 +241,10 @@ fn main() -> anyhow::Result<()> {
     };
 
     // TODO: serve methods
-    // Only the methods this instantiation declared via `implements-method`
-    // (recorded in its store's `Ctx` during the guest constructor) are
-    // advertised.
+    // The methods this instantiation declared via `implements-method` (recorded
+    // in its store's `Ctx` during the guest constructor) gate the WIT listing.
     let implemented = &utxo.as_context().data().implemented;
-    for (name, method) in contract.utxo_methods(&export) {
-        let method = method?;
-        if !implemented.contains(&method_hash(name)) {
-            continue;
-        }
-        let ty = method.ty();
-        let params: Vec<_> = ty.params().collect();
-        let results: Vec<_> = ty.results().collect();
-        println!("{name}: {params:?} -> {results:?}");
-    }
+    print_wit(&contract, &export_name, &export, implemented)?;
     utxo.drop()?;
     Ok(())
 }
