@@ -2,10 +2,12 @@
 // JSPI (WebAssembly.Suspending / WebAssembly.promising), plus the `drive`
 // runner the Rust side (`src/fiber.rs`) ships suspendable jobs to.
 //
-// The runtime module imports `wasmtime_fiber_init`/`wasmtime_fiber_switch`
-// from the wasm module `env`, and wasm-bindgen turns that into an ES import
-// of the bare specifier "env" — which resolves to this file via the import
-// map in `index.html` (browser) or the resolve hook in `repro.mjs` (Node).
+// The runtime module imports `fiber_init`/`fiber_switch` from the wasm module
+// `env` (its Rust shims in `src/fiber.rs` forward wasmtime's
+// `wasmtime_fiber_init`/`wasmtime_fiber_switch` hooks to them), and wasm-bindgen
+// turns that into an ES import of the bare specifier "env" — which resolves to
+// this file via the import map in `index.html` (browser) or the resolve hook in
+// `repro.mjs` (Node).
 //
 // Each fiber record's `slot` holds the parked "other side" for that fiber's
 // top-of-stack; a switch parks the caller, swaps the shadow-stack pointer,
@@ -51,7 +53,7 @@ export function setup(exports) {
 
 // Registers a new fiber whose stack spans up to `top`, scheduled to run
 // `entry(arg0, top)` once it is first switched to.
-export function wasmtime_fiber_init(top, entry, arg0) {
+export function fiber_init(top, entry, arg0) {
   fibers.set(top, { entry, arg0, started: false, slot: null });
 }
 
@@ -99,7 +101,7 @@ function fiberSwitch(top) {
   return wait;
 }
 
-export const wasmtime_fiber_switch =
+export const fiber_switch =
   typeof WebAssembly.Suspending === "function"
     ? new WebAssembly.Suspending(fiberSwitch)
     : jspiUnavailable;

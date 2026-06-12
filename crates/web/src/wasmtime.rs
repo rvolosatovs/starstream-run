@@ -13,10 +13,9 @@
 //!   * copy-on-write memory images are disabled (we return "no image").
 //!
 //! The `custom-fiber` stack-switching hooks (`wasmtime_fiber_init` /
-//! `wasmtime_fiber_switch`) are deliberately *not* defined here: a wasm32
-//! program cannot switch its own stack, so they must stay unresolved — they
-//! surface as imports from the `env` module, satisfied by the JSPI glue in
-//! `web/fiber-env.js`. See [`crate::fiber`].
+//! `wasmtime_fiber_switch`) are defined analogously in [`crate::fiber`], but as
+//! thin shims: a wasm32 program cannot switch its own stack, so they forward to
+//! JS imports satisfied by the JSPI glue in `web/fiber-env.js`.
 
 use core::ffi::c_void;
 use core::ptr;

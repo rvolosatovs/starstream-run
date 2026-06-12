@@ -4,8 +4,13 @@
 //! With the `custom-fiber` feature, wasmtime's async support (which normally
 //! switches native stacks with inline assembly — impossible from inside a
 //! wasm32 sandbox) calls out to two C-ABI hooks instead:
-//! `wasmtime_fiber_init` and `wasmtime_fiber_switch`. On wasm targets those
-//! are *imports* from the `env` module; the JS half lives in
+//! `wasmtime_fiber_init` and `wasmtime_fiber_switch`. Wasmtime references those
+//! as plain `extern "C"` symbols; we *define* them here (just as
+//! [`crate::wasmtime`] defines the `custom-virtual-memory` hooks), as thin
+//! shims that forward to the JS implementations imported from the `env` module
+//! as `fiber_init` / `fiber_switch`. Defining them on our side — rather than
+//! relying on wasmtime declaring them as `env` imports itself — keeps the whole
+//! embedder ABI owned by this crate. The JS half lives in
 //! [`web/fiber-env.js`](../web/fiber-env.js) — resolved as the bare module
 //! specifier `env` via the import map in `index.html` (or the resolve hook in
 //! `repro.mjs` under Node) — and implements them with JSPI
@@ -77,12 +82,50 @@ extern "C" {
 #[cfg(target_family = "wasm")]
 #[link(wasm_import_module = "env")]
 unsafe extern "C" {
+    /// Register a new fiber whose stack spans up to `top_of_stack`, scheduled
+    /// to run `entry(entry_arg0, top_of_stack)` once it is first switched to.
+    /// The JS half of [`wasmtime_fiber_init`].
+    fn fiber_init(top_of_stack: *mut u8, entry: FiberEntry, entry_arg0: *mut u8);
+
+    /// Symmetrically switch between the current execution context and the one
+    /// associated with `top_of_stack`. The JS half of [`wasmtime_fiber_switch`].
+    /// Like [`starstream_fiber_park`], a raw wasm import (no wasm-bindgen glue):
+    /// the glue's `WebAssembly.Suspending` must land directly in the import slot
+    /// — a `Suspending` object is not callable as a plain JS function, so it
+    /// cannot sit behind wasm-bindgen's import shims.
+    fn fiber_switch(top_of_stack: *mut u8);
+
     /// Suspend the current activation until [`starstream_fiber_unpark`] is
     /// called. A raw wasm import (no wasm-bindgen glue): the glue's
     /// `WebAssembly.Suspending` must land directly in the import slot — a
     /// `Suspending` object is not callable as a plain JS function, so it
     /// cannot sit behind wasm-bindgen's import shims.
     fn starstream_fiber_park();
+}
+
+/// wasmtime's `custom-fiber` `wasmtime_fiber_init` hook: forwards straight to
+/// the JS [`fiber_init`] import. Defined here — rather than imported by
+/// wasmtime — so this crate owns the embedder ABI; only built for wasm, where
+/// the `custom` stack-switch backend is active (native targets use wasmtime's
+/// own assembly routines and define these symbols themselves).
+#[cfg(target_family = "wasm")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wasmtime_fiber_init(
+    top_of_stack: *mut u8,
+    entry: FiberEntry,
+    entry_arg0: *mut u8,
+) {
+    unsafe { fiber_init(top_of_stack, entry, entry_arg0) }
+}
+
+/// wasmtime's `custom-fiber` `wasmtime_fiber_switch` hook: forwards straight to
+/// the JS [`fiber_switch`] import, whose `WebAssembly.Suspending` performs the
+/// actual JSPI stack switch — the suspension propagates transparently up through
+/// this wasm frame to the enclosing `promising` activation. See [`fiber_init`].
+#[cfg(target_family = "wasm")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wasmtime_fiber_switch(top_of_stack: *mut u8) {
+    unsafe { fiber_switch(top_of_stack) }
 }
 
 /// Host (non-wasm) builds compile this crate but never run it; a defined stub
