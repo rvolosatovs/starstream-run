@@ -48,8 +48,9 @@ fn builds_and_runs_score_component() {
     let wasm = build_score();
 
     // Run the produced module through the CLI: the host wraps the core module
-    // into a component and instantiates it.
+    // into a component, instantiates it and mints a UTXO via `[static]utxo.new`.
     let status = Command::new(env!("CARGO_BIN_EXE_starstream-run"))
+        .arg("new")
         .arg(&wasm)
         .status()
         .expect("failed to spawn the starstream-run CLI");

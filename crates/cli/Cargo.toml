@@ -11,9 +11,11 @@ clap = { workspace = true, features = [
     "error-context",
     "help",
     "std",
+    "string",
     "suggestions",
     "usage",
 ] }
+sha2 = { workspace = true }
 starstream-run = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = [
@@ -23,4 +25,4 @@ tracing-subscriber = { workspace = true, features = [
     "smallvec",
     "tracing-log",
 ] }
-wasmtime = { workspace = true }
+wasmtime = { workspace = true, features = ["wave"] }
