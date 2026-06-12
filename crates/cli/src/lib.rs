@@ -13,7 +13,7 @@
 //! implementation.
 
 use starstream_run::bindings;
-use tracing::error;
+use tracing::{error, info};
 
 /// The Cardano context a contract can observe via the `starstream:std/cardano`
 /// host functions.
@@ -46,5 +46,11 @@ impl bindings::starstream::std::cardano::Host for Ctx {
 
     fn current_slot(&mut self) -> i64 {
         self.cardano.current_slot
+    }
+}
+
+impl starstream_run::EventHandler for Ctx {
+    fn emit_event(&mut self, instance: &str, name: &str, params: &[wasmtime::component::Val]) {
+        info!(instance, name, ?params, "ABI event emitted");
     }
 }

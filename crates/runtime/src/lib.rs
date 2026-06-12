@@ -2,7 +2,7 @@ use core::ops::Deref;
 
 use std::sync::Arc;
 
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 use wasi_preview1_component_adapter_provider::{
     WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME, WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
 };
@@ -49,15 +49,30 @@ pub mod bindings {
 /// This trait is a blanket alias for those bounds, so any type that satisfies
 /// them implements it automatically.
 pub trait Host:
-    bindings::starstream::std::builtin::Host + bindings::starstream::std::cardano::Host + 'static
+    bindings::starstream::std::builtin::Host
+    + bindings::starstream::std::cardano::Host
+    + EventHandler
+    + 'static
 {
 }
 
 impl<T> Host for T where
     T: bindings::starstream::std::builtin::Host
         + bindings::starstream::std::cardano::Host
+        + EventHandler
         + 'static
 {
+}
+
+/// Receives ABI events as the guest emits them.
+///
+/// An `abi`'s `event` (`emit Foo(..)`) is lowered to an imported host function;
+/// [`link_abi_event_function`] installs a shim that forwards every emission here
+/// with the emitting interface name, the event name and its positional argument
+/// values. The runtime supplies no implementation — the CLI logs events, the
+/// web crate buffers them for display in its UI.
+pub trait EventHandler {
+    fn emit_event(&mut self, instance: &str, name: &str, params: &[wasmtime::component::Val]);
 }
 
 pub enum Val {
@@ -163,7 +178,7 @@ fn load_component(engine: &Engine, wasm: impl AsRef<[u8]>) -> wasmtime::Result<C
 
 /// Link ABI event [`types::ComponentFunc`] in a [`LinkerInstance`]
 #[instrument(level = "trace", skip_all)]
-pub fn link_abi_event_function<T>(
+pub fn link_abi_event_function<T: EventHandler>(
     linker: &mut LinkerInstance<T>,
     _ty: types::ComponentFunc,
     instance: &str,
@@ -174,8 +189,8 @@ pub fn link_abi_event_function<T>(
     let name = Arc::<str>::from(name);
     linker.func_new(
         &Arc::clone(&name),
-        move |mut _store, _ty, params, _results| {
-            info!(%instance, %name, ?params, "ABI event emitted");
+        move |mut store, _ty, params, _results| {
+            store.data_mut().emit_event(&instance, &name, params);
             Ok(())
         },
     )
@@ -183,7 +198,7 @@ pub fn link_abi_event_function<T>(
 
 /// Link dynamic imported instance in a [`LinkerInstance`].
 #[instrument(level = "trace", skip_all)]
-pub fn link_instance<T>(
+pub fn link_instance<T: EventHandler>(
     engine: &Engine,
     linker: &mut LinkerInstance<T>,
     ty: types::ComponentInstance,
@@ -219,7 +234,7 @@ pub fn link_instance<T>(
 
 /// Link dynamic imports of the contract
 #[instrument(level = "trace", skip_all)]
-pub fn link_dynamic_imports<T>(
+pub fn link_dynamic_imports<T: EventHandler>(
     engine: &Engine,
     linker: &mut Linker<T>,
     ty: types::Component,

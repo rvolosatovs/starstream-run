@@ -61,12 +61,22 @@ onmessage = async ({ data }) => {
   }
 
   const { id, op } = data;
+  // Drain any ABI events the guest emitted during this op and ship them with
+  // the response, so the page can show them in the invocation panel's log.
+  const drainEvents = () => {
+    try {
+      return contract ? JSON.parse(contract.drainEvents()) : [];
+    } catch {
+      return [];
+    }
+  };
   try {
     await booted;
     const handler = ops[op];
     if (!handler) throw new Error(`unknown op: ${op}`);
-    postMessage({ id, ok: true, result: await handler(data) });
+    const result = await handler(data);
+    postMessage({ id, ok: true, result, events: drainEvents() });
   } catch (err) {
-    postMessage({ id, ok: false, error: String(err?.message ?? err) });
+    postMessage({ id, ok: false, error: String(err?.message ?? err), events: drainEvents() });
   }
 };

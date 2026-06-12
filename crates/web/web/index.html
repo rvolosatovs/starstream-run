@@ -131,6 +131,13 @@
         word-break: break-all;
       }
       .contract-status { color: var(--muted); font-size: 0.85rem; }
+      .contract-sha {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.75rem;
+        color: var(--muted);
+        margin-top: 0.35rem;
+        word-break: break-all;
+      }
       .contract-status.ok { color: var(--ok); }
       .contract-status.err { color: var(--err); }
       .contract-head .terminate-btn {
@@ -180,15 +187,24 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         color: var(--accent);
         word-break: break-all;
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+      }
+      .badge {
+        flex: none;
+        font-family: system-ui, sans-serif;
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--bg);
+        background: var(--accent);
+        border-radius: 4px;
+        padding: 0.1rem 0.4rem;
+        align-self: center;
       }
       .resource { margin-top: 1rem; }
-      .resource > h3 {
-        font-size: 0.95rem;
-        margin: 0 0 0.5rem;
-        padding-bottom: 0.35rem;
-        border-bottom: 1px solid #3f3f46;
-      }
-      .resource > h3 .kw { color: var(--muted); font-weight: 400; }
       .subhead {
         color: var(--muted);
         font-size: 0.78rem;
@@ -275,6 +291,73 @@
         padding: 0.2rem 0.6rem;
         font-size: 0.8rem;
       }
+
+      /* The single invocation panel: contract + live-UTXO dropdowns, then the
+         selected UTXO's methods. */
+      #invoke:empty { display: none; }
+      .invoke-select {
+        font: inherit;
+        font-size: 0.9rem;
+        color: var(--fg);
+        background: var(--bg);
+        border: 1px solid #3f3f46;
+        border-radius: 6px;
+        padding: 0.3rem 0.45rem;
+        max-width: 100%;
+      }
+      .invoke-select:disabled { opacity: 0.5; }
+      .invoke-panel { margin-top: 0; }
+      .invoke-panel .selects {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+      }
+      .invoke-panel .methods { margin-top: 0.75rem; }
+      .invoke-log-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      .log-clear-btn {
+        margin: 0;
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid #3f3f46;
+        padding: 0.15rem 0.55rem;
+        font-size: 0.78rem;
+        font-weight: 400;
+      }
+      .invoke-log {
+        background: var(--panel);
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+        max-height: 16rem;
+        overflow: auto;
+        font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .invoke-log-empty { color: var(--muted); font-style: italic; }
+      .log-item {
+        display: flex;
+        gap: 0.5rem;
+        align-items: baseline;
+        padding: 0.15rem 0;
+        word-break: break-word;
+      }
+      .log-tag {
+        flex: none;
+        width: 3.2rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        font-size: 0.7rem;
+        letter-spacing: 0.03em;
+      }
+      .log-event .log-tag { color: var(--accent); }
+      .log-ok .log-tag { color: var(--ok); }
+      .log-err .log-tag { color: var(--err); }
+      .log-sig { flex: none; color: var(--fg); font-weight: 600; }
+      .log-detail { color: var(--muted); white-space: pre-wrap; }
+      .log-err .log-detail { color: var(--err); }
     </style>
   </head>
   <body>
@@ -290,6 +373,10 @@
         <a href="https://starstream-run.netlify.app/" target="_blank" rel="noopener">Live deployment</a>
       </nav>
 
+      <!-- The single invocation surface: pick a contract, then one of its live
+           UTXOs, then call that UTXO's methods. Hidden until a contract loads. -->
+      <div id="invoke"></div>
+
       <label class="drop" id="drop">
         <input type="file" id="file" accept=".wasm,application/wasm" multiple />
         <div>Drop <strong>.wasm</strong> files here, or click to choose — each one loads as its own contract</div>
@@ -304,10 +391,16 @@
 
       <footer>
         Accepts a full component or a core module with a <code>component-type</code>
-        custom section. Each loaded contract gets its own Web Worker; within a
-        contract, every exported instance that owns a resource is listed: call a
-        constructor (e.g. <code>new</code>) to mint a handle, then invoke its
-        methods. Per-contract trace logs appear at the bottom of each card.
+        custom section. Each loaded contract gets its own Web Worker and is
+        identified by its sha256; loading a contract whose hash is already
+        present is rejected. Within a contract's card, every exported instance
+        that owns a resource is listed: call a constructor (e.g. <code>new</code>)
+        or load from storage to mint a live UTXO (labelled
+        <code>&lt;instance&gt; #&lt;n&gt;</code>). Then use the single
+        <strong>Invoke</strong> panel at the top — pick a contract, pick one of
+        its live UTXOs, and call that UTXO's methods; return values and emitted
+        events stream into that panel's log. Per-contract trace logs appear at
+        the bottom of each card.
       </footer>
     </main>
 
@@ -324,6 +417,10 @@
       const addDefaultBtn = document.getElementById("add-default");
       const status = document.getElementById("status");
       const contractsEl = document.getElementById("contracts");
+      const invokeEl = document.getElementById("invoke");
+
+      let nextContractId = 0; // distinguishes contracts in the invocation panel
+      const loadedHashes = new Set(); // sha256 hex of every currently-loaded contract
 
       function setStatus(text, kind = "") {
         status.textContent = text;
@@ -341,7 +438,7 @@
       // render code below is oblivious to the Worker boundary.
 
       class ContractProxy {
-        constructor(module, onLog) {
+        constructor(module, onLog, onEvent = () => {}) {
           this.worker = new Worker("./contract.worker.js", { type: "module" });
           this.nextId = 0;
           this.pending = new Map();
@@ -356,6 +453,9 @@
             const p = this.pending.get(data.id);
             if (!p) return;
             this.pending.delete(data.id);
+            // Surface any ABI events emitted during the op before the call's
+            // own result, so the log reads in emission order.
+            if (data.events && data.events.length) onEvent(data.events);
             data.ok ? p.resolve(data.result) : p.reject(new Error(data.error));
           };
           this.worker.onerror = (e) =>
@@ -463,42 +563,70 @@
       // Render one callable function (constructor or method) as a panel. `cx`
       // is the ContractProxy the call is routed to. `afterCall` runs after a
       // successful call (used to refresh a handle's storage display).
-      function renderFunc(cx, instanceName, func, prefix, onResult = () => {}, afterCall = () => {}) {
-        const result = el("div", { className: "result" });
+      //
+      // If `output` is given (the invocation panel passes one), the call's
+      // outcome is reported through it as `(label, ok, text)` and rendered in
+      // that panel's log instead of inline; otherwise it shows inline beneath
+      // the function (constructors and the "from storage" loader use this).
+      function renderFunc(cx, instanceName, func, prefix, onResult = () => {}, afterCall = () => {}, output = null) {
+        const result = output ? null : el("div", { className: "result" });
         const params = buildParams(func.params, prefix);
         const button = el("button", { type: "button", textContent: "Call" });
+
+        const report = (ok, text) => {
+          if (output) {
+            output(func.label, ok, text);
+          } else {
+            result.className = "result " + (ok ? "ok" : "err");
+            result.textContent = text;
+          }
+        };
 
         button.addEventListener("click", async () => {
           let args;
           try {
             args = params.read();
           } catch (err) {
-            result.className = "result err";
-            result.textContent = `Invalid input: ${err.message ?? err}`;
+            report(false, `Invalid input: ${err.message ?? err}`);
             return;
           }
           try {
             const raw = await cx.call(instanceName, func.export, JSON.stringify(args));
             const results = JSON.parse(raw);
-            result.className = "result ok";
-            result.textContent = results.length ? JSON.stringify(results, null, 2) : "(no return value)";
+            // A constructor returns just the minted handle (`{$handle}`), which
+            // already shows up as a live UTXO — printing it back is redundant.
+            const justHandles =
+              results.length > 0 &&
+              results.every((r) => r && typeof r === "object" && typeof r.$handle === "number");
+            report(
+              true,
+              results.length === 0 ? "(no return value)" : justHandles ? "(constructed)" : JSON.stringify(results),
+            );
             for (const id of collectHandles(results, [])) onResult(id);
             await afterCall();
           } catch (err) {
-            result.className = "result err";
-            result.textContent = String(err.message ?? err);
+            report(false, String(err.message ?? err));
           }
         });
 
-        return el("div", { className: "func" }, [
+        const children = [
           el("div", { className: "func-head" }, [el("span", { className: "func-name", textContent: func.label }), button]),
           params.node,
-          result,
-        ]);
+        ];
+        if (result) children.push(result);
+        return el("div", { className: "func" }, children);
       }
 
       // Render the interactive surface for one contract into `bodyEl`.
-      function renderContract(cx, bodyEl, api) {
+      //
+      // Layout: one "UTXO" panel per exported instance — its constructors, the
+      // "from storage" loader, and the live UTXOs it has minted (each with its
+      // read-only storage view and a drop button). Methods are *not* rendered
+      // here; they live in the single global invocation panel above the drop
+      // zone, driven off `entry.liveHandles`. `notify` (the global registry's
+      // notifier) is called whenever a UTXO is minted or dropped so that panel
+      // refreshes.
+      function renderContract(cx, bodyEl, api, entry, notify) {
         bodyEl.replaceChildren();
 
         const instances = api.instances ?? [];
@@ -509,18 +637,41 @@
           return;
         }
 
+        // Every live UTXO in this contract lives in `entry.liveHandles`, keyed
+        // by its runtime handle id. Each entry carries the instance it belongs
+        // to (for method lookup), a display label (`<instance> #<n>`) and a
+        // `refresh` for its storage view. The global invocation panel reads it.
+        const liveHandles = entry.liveHandles;
+        const counters = new Map(); // instance name -> next instantiation number
+
         for (const instance of instances) {
-          const instNode = el("div", { className: "instance" }, [el("h2", { textContent: instance.name })]);
+          // The resource kind (e.g. `utxo`) classifies the instance as a badge
+          // before its name, rather than a separate "resource <kind>" line.
+          const instNode = el("div", { className: "instance" }, [
+            el("h2", {}, [
+              el("span", { className: "badge", textContent: instance.resource }),
+              el("span", { textContent: instance.name }),
+            ]),
+          ]);
 
           const resNode = el("div", { className: "resource" });
-          resNode.append(
-            el("h3", {}, [el("span", { className: "kw", textContent: "resource " }), el("span", { textContent: instance.resource })]),
-          );
 
-          // Live handles for this resource, with their method/storage panels.
+          // Live UTXOs for this instance, each shown as a card with its storage
+          // view and drop button (methods live in the global panel above).
           const handlesEl = el("div", { className: "handles" });
           const addHandle = (id) => {
-            handlesEl.append(renderHandle(cx, instance, id));
+            const n = counters.get(instance.name) ?? 0;
+            counters.set(instance.name, n + 1);
+            // The global dropdown needs the instance to disambiguate, but the
+            // card sits under that instance's heading, so it shows only `#n`.
+            const label = `${instance.name} #${n}`;
+            const handle = renderHandle(cx, instance, id, `#${n}`, () => {
+              liveHandles.delete(id);
+              notify();
+            });
+            liveHandles.set(id, { id, instance, label, refresh: handle.refresh });
+            handlesEl.append(handle.node);
+            notify();
           };
 
           // A UTXO can be minted two ways: by calling a `[static]` constructor,
@@ -536,11 +687,190 @@
             }
           }
 
-          resNode.append(el("p", { className: "subhead", textContent: "Live handles" }));
+          resNode.append(el("p", { className: "subhead", textContent: "Live UTXOs" }));
           resNode.append(handlesEl);
           instNode.append(resNode);
           bodyEl.append(instNode);
         }
+      }
+
+      // ----- The global invocation panel ----------------------------------
+      // A single panel above the drop zone. The `registry` tracks every loaded
+      // contract and, per contract, its live UTXOs; the panel renders two
+      // dropdowns (contract, then live UTXO) and the methods callable on the
+      // selected UTXO. It rebuilds whenever a contract is added/removed or a
+      // UTXO is minted/dropped, via `registry.notify()`.
+
+      const registry = {
+        contracts: new Map(), // contract id -> { id, cx, label, liveHandles, log }
+        listeners: [], // run when a contract/UTXO is added or removed
+        logListeners: [], // run when a contract's invocation log changes
+        notify() {
+          for (const fn of this.listeners) fn();
+        },
+        notifyLog() {
+          for (const fn of this.logListeners) fn();
+        },
+      };
+
+      // Build the global invocation panel (called once). Reads `registry`.
+      function renderInvokePanel() {
+        const contractSelect = el("select", { className: "invoke-select" });
+        const utxoSelect = el("select", { className: "invoke-select" });
+        const methodsEl = el("div", { className: "methods" });
+        const logEl = el("div", { className: "invoke-log" });
+
+        const currentContract = () => registry.contracts.get(Number(contractSelect.value));
+        const currentHandle = () => {
+          const c = currentContract();
+          return c && c.liveHandles.get(Number(utxoSelect.value));
+        };
+
+        // An output sink for a method call: append its outcome (with the
+        // function label) to that contract's log, then re-render the log.
+        const logResult = (c) => (label, ok, text) => {
+          c.log.push({ type: "result", label, ok, text });
+          registry.notifyLog();
+        };
+
+        const renderMethods = () => {
+          methodsEl.replaceChildren();
+          const c = currentContract();
+          const handle = currentHandle();
+          if (!handle) {
+            methodsEl.append(
+              el("p", {
+                className: "subhead",
+                textContent: c
+                  ? "No live UTXO — construct one in this contract's card below."
+                  : "No contract loaded.",
+              }),
+            );
+            return;
+          }
+          if (!handle.instance.methods.length) {
+            methodsEl.append(el("p", { className: "subhead", textContent: "(this UTXO has no methods)" }));
+            return;
+          }
+          for (const func of handle.instance.methods) {
+            methodsEl.append(
+              renderFunc(c.cx, handle.instance.name, func, () => [{ $handle: handle.id }], undefined, handle.refresh, logResult(c)),
+            );
+          }
+        };
+
+        // Render the selected contract's invocation log: emitted events and
+        // method return values, in order.
+        const renderLog = () => {
+          logEl.replaceChildren();
+          const c = currentContract();
+          const items = c ? c.log : [];
+          if (!items.length) {
+            logEl.append(el("div", { className: "invoke-log-empty", textContent: "No calls or events yet." }));
+            return;
+          }
+          for (const item of items) logEl.append(renderLogItem(item));
+          logEl.scrollTop = logEl.scrollHeight;
+        };
+
+        // Repopulate the UTXO dropdown from the selected contract's live UTXOs,
+        // preserving the prior selection when it is still live.
+        const rebuildUtxos = () => {
+          const prev = utxoSelect.value;
+          utxoSelect.replaceChildren();
+          const c = currentContract();
+          const handles = c ? c.liveHandles : null;
+          if (!handles || handles.size === 0) {
+            utxoSelect.append(el("option", { value: "", textContent: "— no live UTXOs —" }));
+            utxoSelect.disabled = true;
+          } else {
+            utxoSelect.disabled = false;
+            for (const { id, label } of handles.values()) {
+              utxoSelect.append(el("option", { value: String(id), textContent: label }));
+            }
+            // Restore the prior selection only if it is non-empty and still
+            // live; otherwise leave the browser's default (first option), so a
+            // freshly minted sole UTXO auto-selects instead of staying blank.
+            if (prev !== "" && handles.has(Number(prev))) utxoSelect.value = prev;
+          }
+          renderMethods();
+        };
+
+        // Repopulate the contract dropdown, preserving selection when still
+        // present; cascades into the UTXO dropdown. The panel itself is always
+        // visible — it just shows placeholder options when nothing is loaded.
+        const rebuildContracts = () => {
+          const prev = contractSelect.value;
+          contractSelect.replaceChildren();
+          if (registry.contracts.size === 0) {
+            contractSelect.append(el("option", { value: "", textContent: "— no contracts —" }));
+            contractSelect.disabled = true;
+          } else {
+            contractSelect.disabled = false;
+            for (const { id, label } of registry.contracts.values()) {
+              contractSelect.append(el("option", { value: String(id), textContent: label }));
+            }
+            // As with the UTXO dropdown, only restore a non-empty, still-present
+            // selection — so the first loaded contract auto-selects.
+            if (prev !== "" && registry.contracts.has(Number(prev))) contractSelect.value = prev;
+          }
+          rebuildUtxos();
+          renderLog();
+        };
+
+        // Switching contracts re-renders both its UTXOs and its log.
+        contractSelect.addEventListener("change", () => {
+          rebuildUtxos();
+          renderLog();
+        });
+        utxoSelect.addEventListener("change", renderMethods);
+        registry.listeners.push(rebuildContracts);
+        registry.logListeners.push(renderLog);
+
+        const clearBtn = el("button", { type: "button", className: "log-clear-btn", textContent: "clear" });
+        clearBtn.addEventListener("click", () => {
+          const c = currentContract();
+          if (c) {
+            c.log.length = 0;
+            renderLog();
+          }
+        });
+
+        const panel = el("div", { className: "instance invoke-panel" }, [
+          el("h2", { textContent: "Invoke" }),
+          el("div", { className: "selects" }, [
+            el("div", { className: "field" }, [el("label", { textContent: "contract" }), contractSelect]),
+            el("div", { className: "field" }, [el("label", { textContent: "live UTXO" }), utxoSelect]),
+          ]),
+          methodsEl,
+          el("div", { className: "invoke-log-head" }, [
+            el("span", { className: "subhead", textContent: "Log — events & return values" }),
+            clearBtn,
+          ]),
+          logEl,
+        ]);
+        rebuildContracts();
+        return panel;
+      }
+
+      // Render one invocation-log entry: an emitted ABI event or a method's
+      // return value (tagged and coloured).
+      function renderLogItem(item) {
+        if (item.type === "event") {
+          // Show the emission as a call signature — `instance.name(arg, arg)` —
+          // so the arguments passed to the event read clearly.
+          const args = Array.isArray(item.params) ? item.params.map((p) => JSON.stringify(p)).join(", ") : "";
+          return el("div", { className: "log-item log-event" }, [
+            el("span", { className: "log-tag", textContent: "event" }),
+            el("span", { className: "log-sig", textContent: `${item.instance}.${item.name}` }),
+            el("span", { className: "log-detail", textContent: `(${args})` }),
+          ]);
+        }
+        return el("div", { className: "log-item " + (item.ok ? "log-ok" : "log-err") }, [
+          el("span", { className: "log-tag", textContent: item.ok ? "→" : "✗" }),
+          el("span", { className: "log-sig", textContent: item.label }),
+          el("span", { className: "log-detail", textContent: item.text }),
+        ]);
       }
 
       // Render a "from storage" constructor panel: one scalar input per storage
@@ -584,14 +914,19 @@
         ]);
       }
 
-      // Render a single live handle card: one panel per method, plus a storage
-      // section showing the resource's current storage when it owns one.
-      function renderHandle(cx, instance, id) {
+      // Render a single live UTXO card for the UTXO panel: its label, a
+      // read-only storage view (when the resource owns one) and a drop button.
+      // Methods are *not* here any more — they live in the shared Methods panel,
+      // callable against whichever live UTXO is selected. `onDrop` runs after
+      // the handle is dropped, so the registry/dropdown can forget it. Returns
+      // `{ node, refresh }`; `refresh()` re-reads the storage view (the Methods
+      // panel calls it after a method runs).
+      function renderHandle(cx, instance, id, label, onDrop) {
         const card = el("div", { className: "handle" });
         const dropBtn = el("button", { type: "button", className: "drop-btn", textContent: "drop" });
         card.append(
           el("div", { className: "handle-head" }, [
-            el("span", { className: "handle-title", textContent: `${instance.resource} #${id}` }),
+            el("span", { className: "handle-title", textContent: label }),
             dropBtn,
           ]),
         );
@@ -606,30 +941,19 @@
             console.warn("dropResource failed", err);
           }
           card.remove();
+          onDrop();
         });
 
         // Storage is read-only here: it reflects the resource's current state,
         // refreshed once after construction and again after every method call.
-        // Shown above the methods so the current state is the first thing seen.
         const storage = instance.storage ? renderStorage(cx, id) : null;
-        const refreshStorage = storage ? storage.refresh : () => {};
-
         if (storage) {
           card.append(storage.node);
           // Show the initial storage state right after the UTXO is constructed.
           storage.refresh();
         }
 
-        const handleRef = () => [{ $handle: id }];
-        if (instance.methods.length) {
-          for (const func of instance.methods) {
-            card.append(renderFunc(cx, instance.name, func, handleRef, undefined, refreshStorage));
-          }
-        } else {
-          card.append(el("p", { className: "subhead", textContent: "(no methods)" }));
-        }
-
-        return card;
+        return { node: card, refresh: storage ? storage.refresh : () => {} };
       }
 
       // Render a handle's read-only `storage` panel, showing the current storage
@@ -677,6 +1001,8 @@
       function makeCard(name) {
         const statusEl = el("span", { className: "contract-status", textContent: "starting worker…" });
         const terminateBtn = el("button", { type: "button", className: "terminate-btn", textContent: "terminate" });
+        // The contract's identity is its sha256; filled in once it is computed.
+        const shaEl = el("div", { className: "contract-sha", textContent: "sha256: …" });
         const blockHeight = el("input", { type: "number", step: "1", min: "0", value: "0" });
         const currentSlot = el("input", { type: "number", step: "1", min: "0", value: "0" });
         const bodyEl = el("div", { className: "contract" });
@@ -688,6 +1014,7 @@
             statusEl,
             terminateBtn,
           ]),
+          shaEl,
           el("fieldset", { className: "cardano" }, [
             el("legend", { textContent: "Cardano context" }),
             el("div", { className: "field" }, [el("label", { textContent: "block height" }), blockHeight]),
@@ -698,24 +1025,80 @@
           logEl,
         ]);
 
-        return { root, statusEl, terminateBtn, blockHeight, currentSlot, bodyEl, logEl };
+        return { root, statusEl, shaEl, terminateBtn, blockHeight, currentSlot, bodyEl, logEl };
+      }
+
+      // The contract's identity: lowercase hex sha256 of its bytes. Needs a
+      // secure context (https or localhost) for `crypto.subtle` — both serving
+      // setups qualify.
+      async function sha256Hex(bytes) {
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
       }
 
       // The compiled runtime module, shared by every Worker.
       let runtimeModule = null;
 
       // Load a contract: spawn its Worker, instantiate the bytes, and render.
-      async function addContract(name, bytes) {
-        if (!runtimeModule) return;
+      // Returns the registry entry on success, or null if it was rejected (no
+      // runtime yet, or a contract with the same sha256 is already loaded).
+      // `onUnload` runs when this contract is later terminated.
+      async function addContract(name, bytes, onUnload = () => {}) {
+        if (!runtimeModule) return null;
+
+        // Identify the contract by its sha256 *before* spawning a worker, so a
+        // duplicate (same bytes, any filename) is rejected up front. A context
+        // without `crypto.subtle` yields a null hash — then we cannot dedup.
+        let hex = null;
+        try {
+          hex = await sha256Hex(bytes);
+        } catch {
+          hex = null;
+        }
+        if (hex && loadedHashes.has(hex)) {
+          setStatus(`A contract with sha256:${hex.slice(0, 16)}… is already loaded.`, "err");
+          return null;
+        }
+        if (hex) loadedHashes.add(hex);
+
         const card = makeCard(name);
+        if (hex) {
+          card.shaEl.textContent = `sha256:${hex}`;
+        } else {
+          card.shaEl.textContent = "sha256: (unavailable)";
+        }
         contractsEl.prepend(card.root);
+
+        // Register the contract in the global registry so the invocation panel
+        // lists it. Its label is the filename plus the sha256; `liveHandles`
+        // grows as UTXOs are minted/dropped, and `log` accumulates this
+        // contract's emitted events and method return values.
+        const entry = {
+          id: nextContractId++,
+          cx: null,
+          label: hex ? `${name} — sha256:${hex.slice(0, 12)}…` : name,
+          liveHandles: new Map(),
+          log: [],
+          hash: hex,
+        };
+        const cx = new ContractProxy(
+          runtimeModule,
+          (line) => appendLog(card.logEl, line),
+          (events) => {
+            for (const ev of events) {
+              entry.log.push({ type: "event", instance: ev.instance, name: ev.name, params: ev.params });
+            }
+            registry.notifyLog();
+          },
+        );
+        entry.cx = cx;
+        registry.contracts.set(entry.id, entry);
+        registry.notify();
 
         const setCardStatus = (text, kind = "") => {
           card.statusEl.textContent = text;
           card.statusEl.className = "contract-status" + (kind ? " " + kind : "");
         };
-
-        const cx = new ContractProxy(runtimeModule, (line) => appendLog(card.logEl, line));
 
         // Push the card's Cardano fields into the worker; applies to UTXOs
         // minted afterwards. `setCardano` takes i64, so values cross as BigInt.
@@ -733,6 +1116,10 @@
         card.terminateBtn.addEventListener("click", () => {
           cx.terminate();
           card.root.remove();
+          registry.contracts.delete(entry.id);
+          if (hex) loadedHashes.delete(hex);
+          registry.notify();
+          onUnload();
         });
 
         try {
@@ -741,25 +1128,37 @@
           await cx.instantiate(bytes);
           await applyCardano();
           const api = JSON.parse(await cx.describe());
-          renderContract(cx, card.bodyEl, api);
+          renderContract(cx, card.bodyEl, api, entry, () => registry.notify());
           setCardStatus("instantiated", "ok");
         } catch (err) {
           setCardStatus("failed: " + String(err.message ?? err), "err");
         }
+        return entry;
       }
 
       async function addFiles(files) {
+        // Sequential so two identical files dropped together can't both pass the
+        // duplicate-hash check before either registers its hash.
         for (const file of files) {
           if (!file) continue;
-          addContract(file.name, new Uint8Array(await file.arrayBuffer()));
+          await addContract(file.name, new Uint8Array(await file.arrayBuffer()));
         }
       }
 
-      // Fetch the bundled example and load it as a contract.
+      // Fetch the bundled example and load it as a contract. While it stays
+      // loaded the button is disabled; unloading it (terminating the card)
+      // re-enables the button via the `onUnload` callback.
       async function addDefault() {
         const res = await fetch("./score.wasm");
         if (!res.ok) throw new Error(`HTTP ${res.status} fetching score.wasm`);
-        addContract("score.wasm", new Uint8Array(await res.arrayBuffer()));
+        const entry = await addContract("score.wasm", new Uint8Array(await res.arrayBuffer()), () => {
+          addDefaultBtn.disabled = false;
+          addDefaultBtn.textContent = "Add the bundled score.wasm example";
+        });
+        if (entry) {
+          addDefaultBtn.disabled = true;
+          addDefaultBtn.textContent = "Bundled score.wasm example loaded";
+        }
       }
 
       fileInput.addEventListener("change", (e) => {
@@ -779,6 +1178,10 @@
       addDefaultBtn.addEventListener("click", () =>
         addDefault().catch((err) => setStatus(String(err), "err")),
       );
+
+      // The single invocation panel is always present, above the drop zone; it
+      // shows placeholders until a contract is loaded and a UTXO is minted.
+      invokeEl.append(renderInvokePanel());
 
       // Compile the runtime once; contracts are loaded on demand (drop a file
       // or click the example button) — nothing is instantiated automatically.

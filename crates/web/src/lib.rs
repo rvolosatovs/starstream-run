@@ -25,6 +25,7 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value, json};
 use tracing_subscriber::fmt::MakeWriter;
@@ -49,10 +50,16 @@ struct CardanoCtx {
 }
 
 /// Store data for browser-run contracts. The web UI does not model a host
-/// ledger, so this only carries the [`CardanoCtx`] the page configures.
-#[derive(Clone, Copy, Default)]
+/// ledger, so this carries the [`CardanoCtx`] the page configures plus a shared
+/// buffer of ABI events the guest emits during a call.
+///
+/// `events` is an `Arc<Mutex<…>>` shared with the owning [`Contract`] (and every
+/// UTXO's store), so emissions from any instantiation accumulate in one place;
+/// [`Contract::drain_events`] hands them to the page for display.
+#[derive(Clone, Default)]
 struct Ctx {
     cardano: CardanoCtx,
+    events: Arc<Mutex<Vec<Value>>>,
 }
 
 impl bindings::starstream::std::builtin::Host for Ctx {
@@ -69,6 +76,17 @@ impl bindings::starstream::std::cardano::Host for Ctx {
 
     fn current_slot(&mut self) -> i64 {
         self.cardano.current_slot
+    }
+}
+
+impl starstream_run::EventHandler for Ctx {
+    fn emit_event(&mut self, instance: &str, name: &str, params: &[Val]) {
+        let args: Vec<Value> = params.iter().map(val_to_json).collect();
+        self.events.lock().unwrap().push(json!({
+            "instance": instance,
+            "name": name,
+            "params": args,
+        }));
     }
 }
 
@@ -106,6 +124,9 @@ pub struct Contract {
     /// The Cardano context seeded into every freshly minted [`Utxo`]'s store
     /// (see [`Contract::set_cardano`]). Each instantiation copies this in.
     cardano: CardanoCtx,
+    /// Shared event buffer handed to every UTXO's [`Ctx`]; drained by
+    /// [`Contract::drain_events`] for display on the page.
+    events: Arc<Mutex<Vec<Value>>>,
 }
 
 /// A live `utxo` handle: the instantiated [`Utxo`] and the export it came from
@@ -195,6 +216,7 @@ impl Contract {
             let params = convert_args(ctor.ty().params(), 0, &args).map_err(js_err)?;
             let ctx = Ctx {
                 cardano: self.cardano,
+                events: Arc::clone(&self.events),
             };
             let new = fiber::run(self.inner.create_utxo_async(ctx, &ctor, &params))
                 .await?
@@ -262,6 +284,7 @@ impl Contract {
         };
         let ctx = Ctx {
             cardano: self.cardano,
+            events: Arc::clone(&self.events),
         };
         let new = fiber::run(self.inner.load_utxo_async(ctx, &storage, fields))
             .await?
@@ -317,6 +340,16 @@ impl Contract {
             .map_err(err_to_js)
     }
 
+    /// Drain the ABI events emitted since the last drain, as a JSON array of
+    /// `{ instance, name, params }` (newest last). The page shows these in the
+    /// invocation panel's log instead of routing them through the trace log.
+    #[wasm_bindgen(js_name = drainEvents)]
+    pub fn drain_events(&self) -> String {
+        let mut events = self.events.lock().unwrap();
+        let drained: Vec<Value> = std::mem::take(&mut events);
+        Value::Array(drained).to_string()
+    }
+
     /// Set the Cardano context (`cardano#block-height` / `cardano#current-slot`)
     /// reported to guests. Applies to UTXOs minted *after* this call; existing
     /// handles keep the context they were instantiated with.
@@ -341,6 +374,7 @@ pub fn instantiate(component: &[u8]) -> Result<Contract, JsError> {
         handles: HashMap::new(),
         next_id: 0,
         cardano: CardanoCtx::default(),
+        events: Arc::default(),
     })
 }
 
