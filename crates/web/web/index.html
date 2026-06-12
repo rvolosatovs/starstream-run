@@ -376,7 +376,6 @@
         call(instance, func, args) { return this.#rpc("call", { instance, func, args }); }
         loadUtxo(instance, storage) { return this.#rpc("loadUtxo", { instance, storage }); }
         storageGet(handle) { return this.#rpc("storageGet", { handle }); }
-        storageSet(handle, value) { return this.#rpc("storageSet", { handle, value }); }
         dropResource(handle) { return this.#rpc("dropResource", { handle }); }
         setCardano(blockHeight, currentSlot) {
           return this.#rpc("setCardano", { blockHeight, currentSlot });
@@ -462,8 +461,9 @@
       }
 
       // Render one callable function (constructor or method) as a panel. `cx`
-      // is the ContractProxy the call is routed to.
-      function renderFunc(cx, instanceName, func, prefix, onResult) {
+      // is the ContractProxy the call is routed to. `afterCall` runs after a
+      // successful call (used to refresh a handle's storage display).
+      function renderFunc(cx, instanceName, func, prefix, onResult = () => {}, afterCall = () => {}) {
         const result = el("div", { className: "result" });
         const params = buildParams(func.params, prefix);
         const button = el("button", { type: "button", textContent: "Call" });
@@ -483,6 +483,7 @@
             result.className = "result ok";
             result.textContent = results.length ? JSON.stringify(results, null, 2) : "(no return value)";
             for (const id of collectHandles(results, [])) onResult(id);
+            await afterCall();
           } catch (err) {
             result.className = "result err";
             result.textContent = String(err.message ?? err);
@@ -584,7 +585,7 @@
       }
 
       // Render a single live handle card: one panel per method, plus a storage
-      // section when the resource owns one.
+      // section showing the resource's current storage when it owns one.
       function renderHandle(cx, instance, id) {
         const card = el("div", { className: "handle" });
         const dropBtn = el("button", { type: "button", className: "drop-btn", textContent: "drop" });
@@ -607,28 +608,36 @@
           card.remove();
         });
 
+        // Storage is read-only here: it reflects the resource's current state,
+        // refreshed once after construction and again after every method call.
+        // Shown above the methods so the current state is the first thing seen.
+        const storage = instance.storage ? renderStorage(cx, id) : null;
+        const refreshStorage = storage ? storage.refresh : () => {};
+
+        if (storage) {
+          card.append(storage.node);
+          // Show the initial storage state right after the UTXO is constructed.
+          storage.refresh();
+        }
+
         const handleRef = () => [{ $handle: id }];
         if (instance.methods.length) {
           for (const func of instance.methods) {
-            card.append(renderFunc(cx, instance.name, func, handleRef));
+            card.append(renderFunc(cx, instance.name, func, handleRef, undefined, refreshStorage));
           }
         } else {
           card.append(el("p", { className: "subhead", textContent: "(no methods)" }));
         }
 
-        if (instance.storage) {
-          card.append(renderStorage(cx, id, instance.storage));
-        }
         return card;
       }
 
-      // Render a handle's `storage` panel: a Get button (read) and a Set form
-      // (one scalar input per field).
-      function renderStorage(cx, id, fields) {
+      // Render a handle's read-only `storage` panel, showing the current storage
+      // record. Returns `{ node, refresh() }`; `refresh()` re-reads the storage
+      // via `storageGet` and updates the display.
+      function renderStorage(cx, id) {
         const result = el("div", { className: "result" });
-
-        const getBtn = el("button", { type: "button", textContent: "Get" });
-        getBtn.addEventListener("click", async () => {
+        const refresh = async () => {
           try {
             result.className = "result ok";
             result.textContent = JSON.stringify(JSON.parse(await cx.storageGet(id)), null, 2);
@@ -636,42 +645,13 @@
             result.className = "result err";
             result.textContent = String(err.message ?? err);
           }
-        });
+        };
 
-        const inputs = fields.map((f) => ({ name: f.name, input: buildInput(f.kind) }));
-        const form = el(
-          "div",
-          { className: "params" },
-          inputs.map(({ name, input }) =>
-            el("div", { className: "field" }, [el("label", { textContent: name }), input.node]),
-          ),
-        );
-        const setBtn = el("button", { type: "button", textContent: "Set" });
-        setBtn.addEventListener("click", async () => {
-          let obj;
-          try {
-            obj = Object.fromEntries(inputs.map((i) => [i.name, i.input.read()]));
-          } catch (err) {
-            result.className = "result err";
-            result.textContent = `Invalid input: ${err.message ?? err}`;
-            return;
-          }
-          try {
-            await cx.storageSet(id, JSON.stringify(obj));
-            result.className = "result ok";
-            result.textContent = "(storage set)";
-          } catch (err) {
-            result.className = "result err";
-            result.textContent = String(err.message ?? err);
-          }
-        });
-
-        return el("div", { className: "func" }, [
-          el("div", { className: "func-head" }, [el("span", { className: "func-name", textContent: "storage" }), getBtn]),
-          form,
-          el("div", { className: "func-head" }, [setBtn]),
+        const node = el("div", { className: "func" }, [
+          el("div", { className: "func-head" }, [el("span", { className: "func-name", textContent: "storage" })]),
           result,
         ]);
+        return { node, refresh };
       }
 
       // Append a worker log line to a card's log panel, colouring by the level

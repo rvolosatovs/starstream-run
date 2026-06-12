@@ -19,9 +19,9 @@
 //! [`wasmtime::component::Val`] against each function's declared type.
 //!
 //! Every method that runs guest code ([`Contract::call`],
-//! [`Contract::storage_get`], [`Contract::storage_set`]) is `async` (a
-//! `Promise` on the JS side): it drives wasmtime's `*_async` APIs, whose
-//! fibers suspend the wasm activation via JSPI — see [`fiber`].
+//! [`Contract::storage_get`]) is `async` (a `Promise` on the JS side): it
+//! drives wasmtime's `*_async` APIs, whose fibers suspend the wasm activation
+//! via JSPI — see [`fiber`].
 
 use std::collections::HashMap;
 use std::io;
@@ -297,46 +297,6 @@ impl Contract {
             .map(|(name, val)| (name.clone(), val_to_json(val)))
             .collect();
         Ok(Value::Object(obj).to_string())
-    }
-
-    /// Set a handle's `storage` from a JSON object.
-    ///
-    /// `set-storage` doesn't mutate in place — it mints a fresh `utxo` from the
-    /// given `storage` record. We reconstruct via [`starstream_run::Contract::load_utxo_async`]
-    /// and swap the freshly loaded [`Utxo`] into the handle, so subsequent
-    /// `storageGet`/method calls observe the new storage.
-    #[wasm_bindgen(js_name = storageSet)]
-    pub async fn storage_set(&mut self, id: u32, value_json: String) -> Result<(), JsError> {
-        let value: Value =
-            serde_json::from_str(&value_json).map_err(|err| JsError::new(&err.to_string()))?;
-        let storage = {
-            let handle = self
-                .handles
-                .get(&id)
-                .ok_or_else(|| JsError::new("unknown handle"))?;
-            handle
-                .export
-                .storage()
-                .cloned()
-                .ok_or_else(|| JsError::new("this resource has no storage"))?
-        };
-        let Val::Record(fields) =
-            json_to_val(&Type::Record(storage.ty().clone()), &value).map_err(js_err)?
-        else {
-            return Err(JsError::new("storage value must be a record"));
-        };
-        let ctx = Ctx {
-            cardano: self.cardano,
-        };
-        let new = fiber::run(self.inner.load_utxo_async(ctx, &storage, fields))
-            .await?
-            .map_err(err_to_js)?;
-        let handle = self
-            .handles
-            .get_mut(&id)
-            .ok_or_else(|| JsError::new("unknown handle"))?;
-        handle.utxo = new;
-        Ok(())
     }
 
     /// Drop a live handle by its id, running the guest resource's destructor.
