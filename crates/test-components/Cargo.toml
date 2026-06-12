@@ -1,0 +1,10 @@
+# Builds the example guest contracts under `examples/components` and exposes
+# their compiled bytes as `const`s for the host crates' tests to consume. It is
+# kept out of the default workspace build (see `default-members` in the root
+# `Cargo.toml`) so a plain `cargo build` does not pull in the `wasm32` guest
+# build — it is only built when a dev-dependent's tests run.
+[package]
+name = "test-components"
+version.workspace = true
+edition.workspace = true
+publish = false

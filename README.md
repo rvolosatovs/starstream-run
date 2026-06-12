@@ -38,10 +38,10 @@ Requires a Rust toolchain supporting **edition 2024**. wasmtime (and
 `custom-fiber` feature lands upstream), not a crates.io release; the WASI
 adapter provider is `45.0.1` and `wasmparser` / `wit-component` are `0.251.0`.
 
-## Example component: `crates/cli/tests/score`
+## Example component: `examples/components/score`
 
-[`crates/cli/tests/score`](crates/cli/tests/score) is a Rust guest that builds a
-component for this WIT:
+[`examples/components/score`](examples/components/score) is a Rust guest that
+builds a component for this WIT:
 
 ```wit
 package root:component;
@@ -82,7 +82,7 @@ It imports the host's `score` interface and exports `score-progress`, whose
 `set-storage` (reconstructs a fresh `utxo` from a stored `storage` record — how
 a UTXO is reloaded from saved state).
 
-The crate is its own workspace, so it stays out of the host crate's build
+The guest is its own workspace, so it stays out of the host crates' build
 graph. It builds to a *core* module carrying a `component-type` custom section
 — the same `wit-component embed` form as [`example.wasm`](example.wasm) — which
 the host's `componentize` step wraps into a full component at run time.
@@ -94,28 +94,30 @@ to be installed: `rustup target add wasm32-unknown-unknown`).
 ```bash
 # build the guest
 cargo build --release --target wasm32-unknown-unknown \
-  --manifest-path crates/cli/tests/score/Cargo.toml
+  --manifest-path examples/components/score/Cargo.toml
 
 # run it through the host
-cargo run -- crates/cli/tests/score/target/wasm32-unknown-unknown/release/score.wasm
+cargo run -- examples/components/score/target/wasm32-unknown-unknown/release/score.wasm
 ```
 
 Inspect the embedded WIT of the produced module with:
 
 ```bash
-wasm-tools component wit crates/cli/tests/score/target/wasm32-unknown-unknown/release/score.wasm
+wasm-tools component wit examples/components/score/target/wasm32-unknown-unknown/release/score.wasm
 ```
 
-The guest is also exercised by integration tests
-([`crates/cli/tests/score.rs`](crates/cli/tests/score.rs)):
-`builds_and_runs_score_component` runs the built module through the CLI binary,
-and `drives_score_utxo_resource` drives the typed runtime API directly —
-discovering the `utxo`, minting a handle with `new`, calling the ABI methods,
-and asserting the accumulated `storage` record read back through the typed
-accessor. The latter is the reference example of using the runtime as a library.
+The guest is built and embedded by the [`test-components`](crates/test-components)
+crate (as `EXAMPLE_SCORE`), which both host crates' integration tests consume:
+- [`crates/cli/tests/score.rs`](crates/cli/tests/score.rs) —
+  `builds_and_runs_score_component` runs the built module through the CLI binary.
+- [`crates/runtime/tests/score.rs`](crates/runtime/tests/score.rs) —
+  `drives_score_utxo_resource` drives the typed runtime API directly:
+  discovering the `utxo`, minting a handle with `new`, calling the ABI methods,
+  and asserting the accumulated `storage` record read back through the typed
+  accessor. It is the reference example of using the runtime as a library.
 
 ```bash
-cargo test --test score
+cargo test --test score          # both crates' `score` tests
 ```
 
 ## Run in the browser

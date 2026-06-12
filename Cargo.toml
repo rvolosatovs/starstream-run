@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# `test-components` builds the `wasm32` example guests in its `build.rs`, so it
+# is kept out of the default set: a plain `cargo build`/`cargo test` at the root
+# does not pull in that guest build. It is built only when the crates that
+# dev-depend on it (the `cli`/`runtime` integration tests) are tested.
+default-members = ["crates/cli", "crates/runtime", "crates/web"]
 
 [workspace.package]
 edition = "2024"
@@ -21,6 +26,7 @@ serde_json = { version = "1.0.150", default-features = false, features = [
 ] }
 sha2 = { version = "0.10.9", default-features = false }
 starstream-run = { version = "0.1.0", path = "crates/runtime" }
+test-components = { version = "0.1.0", path = "crates/test-components" }
 tracing = { version = "0.1.44", default-features = false }
 tracing-subscriber = { version = "0.3.23", default-features = false }
 wasi-preview1-component-adapter-provider = { version = "45.0.1", default-features = false }

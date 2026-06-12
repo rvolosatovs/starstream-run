@@ -11,8 +11,8 @@
     wasm-bindgen --target web --out-dir crates/web/web/pkg \
       target/wasm32-unknown-unknown/release/starstream_run_web.wasm && \
     cargo build --release --target wasm32-unknown-unknown \
-      --manifest-path crates/cli/tests/score/Cargo.toml && \
-    cp crates/cli/tests/score/target/wasm32-unknown-unknown/release/score.wasm \
+      --manifest-path examples/components/score/Cargo.toml && \
+    cp examples/components/score/target/wasm32-unknown-unknown/release/score.wasm \
       crates/web/web/score.wasm && \
     rm -rf dist && cp -r crates/web/web dist
   """

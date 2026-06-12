@@ -26,3 +26,6 @@ tracing-subscriber = { workspace = true, features = [
     "tracing-log",
 ] }
 wasmtime = { workspace = true, features = ["wave"] }
+
+[dev-dependencies]
+test-components = { workspace = true }

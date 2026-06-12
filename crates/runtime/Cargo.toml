@@ -22,3 +22,6 @@ wasmtime = { workspace = true, features = [
     "runtime",
 ] }
 wit-component = { workspace = true }
+
+[dev-dependencies]
+test-components = { workspace = true }
