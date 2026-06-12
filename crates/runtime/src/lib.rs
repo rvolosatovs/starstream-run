@@ -881,17 +881,19 @@ impl<T: 'static> Utxo<T> {
     }
 
     #[instrument(level = "trace", skip_all)]
-    pub fn drop(mut self) -> wasmtime::Result<()> {
-        self.resource.resource_drop(&mut self.store)
+    pub fn drop(mut self) -> wasmtime::Result<T> {
+        self.resource.resource_drop(&mut self.store)?;
+        Ok(self.store.into_data())
     }
 
     #[instrument(level = "trace", skip_all)]
     #[cfg(feature = "async")]
-    pub async fn drop_async(mut self) -> wasmtime::Result<()>
+    pub async fn drop_async(mut self) -> wasmtime::Result<T>
     where
         T: Send,
     {
-        self.resource.resource_drop_async(&mut self.store).await
+        self.resource.resource_drop_async(&mut self.store).await?;
+        Ok(self.store.into_data())
     }
 }
 

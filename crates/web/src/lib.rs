@@ -364,7 +364,8 @@ impl Contract {
             .ok_or_else(|| JsError::new("unknown handle"))?;
         fiber::run(handle.utxo.drop_async())
             .await?
-            .map_err(err_to_js)
+            .map_err(err_to_js)?;
+        Ok(())
     }
 
     /// The export names of the methods this live UTXO has declared callable via
