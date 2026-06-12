@@ -12,9 +12,13 @@ compiler emits). Core modules are wrapped into components in-process via
 `wit_component::ComponentEncoder` (the equivalent of `wasm-tools component
 new`), so both forms run directly.
 
-The same library (`crates/runtime`) runs both natively, via the CLI
-(`crates/cli`), and **in the browser** (`crates/web`), where wasmtime executes
-guests with the Pulley interpreter.
+The library (`crates/runtime`) holds all the real logic and exposes a typed API
+(`Contract<T>` / `Utxo<T>`, generic over a caller-supplied store-data type). It
+runs both natively, via the CLI (`crates/cli`), and **in the browser**
+(`crates/web`), where wasmtime executes guests with the Pulley interpreter.
+Guest-invoking operations come in sync and async pairs over one engine; the
+async halves are gated behind the runtime's `async` cargo feature (used by the
+web crate).
 
 ## Run the host
 
@@ -29,9 +33,10 @@ contract's `utxo` resource (minting handles, calling its ABI methods, reading
 integration test below.
 
 Requires a Rust toolchain supporting **edition 2024**. wasmtime (and
-`cranelift-codegen`, kept on the same git rev) is pinned to a git rev of
-bytecodealliance/wasmtime, not a crates.io release; the WASI adapter provider is
-`45.0.1`.
+`cranelift-codegen`, kept on the same git rev) is pinned to the
+**rvolosatovs/wasmtime fork, branch `feat/custom-fiber`** (until the
+`custom-fiber` feature lands upstream), not a crates.io release; the WASI
+adapter provider is `45.0.1` and `wasmparser` / `wit-component` are `0.251.0`.
 
 ## Example component: `crates/cli/tests/score`
 
@@ -51,8 +56,8 @@ interface score-progress {
       mult: u64,
     }
 
-    get-storage: func(utxo: borrow<utxo>) -> storage;
-    set-storage: func(utxo: borrow<utxo>, storage: storage);
+    get-storage: func(self: borrow<utxo>) -> storage;
+    set-storage: func(storage: storage) -> utxo;
 
     resource utxo {
         new: static func() -> utxo;
@@ -73,8 +78,9 @@ world root {
 It imports the host's `score` interface and exports `score-progress`, whose
 `utxo` resource exposes a `new` constructor and the `Score` ABI methods
 (`plus-chips` / `plus-mult` / `mult-mult` / `finish`). The instance also exports
-`get-storage` / `set-storage` functions (taking `borrow<utxo>`) that read and
-write the resource's mutable `storage` record.
+`get-storage` (reads the resource's `storage` record from a `borrow<utxo>`) and
+`set-storage` (reconstructs a fresh `utxo` from a stored `storage` record — how
+a UTXO is reloaded from saved state).
 
 The crate is its own workspace, so it stays out of the host crate's build
 graph. It builds to a *core* module carrying a `component-type` custom section
@@ -100,8 +106,13 @@ Inspect the embedded WIT of the produced module with:
 wasm-tools component wit crates/cli/tests/score/target/wasm32-unknown-unknown/release/score.wasm
 ```
 
-Building and running it through the CLI is also covered by an integration test
+The guest is also exercised by integration tests
 ([`crates/cli/tests/score.rs`](crates/cli/tests/score.rs)):
+`builds_and_runs_score_component` runs the built module through the CLI binary,
+and `drives_score_utxo_resource` drives the typed runtime API directly —
+discovering the `utxo`, minting a handle with `new`, calling the ABI methods,
+and asserting the accumulated `storage` record read back through the typed
+accessor. The latter is the reference example of using the runtime as a library.
 
 ```bash
 cargo test --test score
@@ -113,7 +124,10 @@ cargo test --test score
 drives it from a small upload page. wasmtime runs the guest with its Pulley
 interpreter, and a custom-virtual-memory shim
 ([`src/wasmtime.rs`](crates/web/src/wasmtime.rs)) stands in for the mmap/TLS
-facilities an OS would normally provide.
+facilities an OS would normally provide. Guest-invoking calls go through the
+runtime's `*_async` APIs, whose fibers are backed by
+[JSPI](https://github.com/WebAssembly/js-promise-integration) — so running the
+page needs **Chromium ≥ 137** (or Node ≥ 24 with `--experimental-wasm-jspi`).
 
 ```bash
 cd crates/web
