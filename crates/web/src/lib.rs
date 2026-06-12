@@ -93,14 +93,14 @@ impl starstream_run::EventHandler for Ctx {
 /// Wire up panic reporting and tracing once, when the module is loaded.
 #[wasm_bindgen(start)]
 fn start() {
-    console_error_panic_hook::set_once();
-
     struct CraneliftProfiler;
     impl cranelift_codegen::timing::Profiler for CraneliftProfiler {
         fn start_pass(&self, _pass: cranelift_codegen::timing::Pass) -> Box<dyn std::any::Any> {
             Box::new(())
         }
     }
+
+    console_error_panic_hook::set_once();
     _ = cranelift_codegen::timing::set_thread_profiler(Box::new(CraneliftProfiler));
 
     tracing_subscriber::fmt()
@@ -213,7 +213,7 @@ impl Contract {
                 .inner
                 .get_utxo_constructor(&utxo, &func)
                 .map_err(err_to_js)?;
-            let params = convert_args(ctor.ty().params(), 0, &args).map_err(js_err)?;
+            let params = convert_args(ctor.ty().params(), 0, &args).map_err(|e| js_err(&e))?;
             let ctx = Ctx {
                 cardano: self.cardano,
                 events: Arc::clone(&self.events),
@@ -239,7 +239,7 @@ impl Contract {
             .map_err(err_to_js)?;
         let id = handle_id(args.first())
             .ok_or_else(|| JsError::new("a method call needs a `$handle` as its first argument"))?;
-        let params = convert_args(method.ty().params(), 1, &args[1..]).map_err(js_err)?;
+        let params = convert_args(method.ty().params(), 1, &args[1..]).map_err(|e| js_err(&e))?;
 
         let handle = self
             .handles
@@ -278,7 +278,7 @@ impl Contract {
             .cloned()
             .ok_or_else(|| JsError::new("this resource has no storage"))?;
         let Val::Record(fields) =
-            json_to_val(&Type::Record(storage.ty().clone()), &value).map_err(js_err)?
+            json_to_val(&Type::Record(storage.ty().clone()), &value).map_err(|e| js_err(&e))?
         else {
             return Err(JsError::new("storage value must be a record"));
         };
@@ -344,6 +344,7 @@ impl Contract {
     /// `{ instance, name, params }` (newest last). The page shows these in the
     /// invocation panel's log instead of routing them through the trace log.
     #[wasm_bindgen(js_name = drainEvents)]
+    #[must_use]
     pub fn drain_events(&self) -> String {
         let mut events = self.events.lock().unwrap();
         let drained: Vec<Value> = std::mem::take(&mut events);
@@ -436,6 +437,9 @@ fn convert_args<'a>(
 /// Lower a JSON value into a [`Val`] of the given component type. Supports the
 /// scalar types plus `record`/`tuple`/`list`/`option`; other types are
 /// rejected.
+// JSON numbers coerced into the guest's narrower integer/float types: the
+// truncation/sign loss is the intended lossy conversion.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn json_to_val(ty: &Type, v: &Value) -> Result<Val, String> {
     let as_i = |v: &Value| {
         v.as_i64()
@@ -550,21 +554,21 @@ fn val_to_json(v: &Val) -> Value {
         Val::Float64(n) => json!(n),
         Val::Char(c) => json!(c.to_string()),
         Val::String(s) => json!(s),
-        Val::List(xs) => Value::Array(xs.iter().map(val_to_json).collect()),
+        Val::List(xs) | Val::Tuple(xs) => Value::Array(xs.iter().map(val_to_json).collect()),
         Val::Record(fields) => Value::Object(
             fields
                 .iter()
                 .map(|(k, v)| (k.clone(), val_to_json(v)))
                 .collect(),
         ),
-        Val::Tuple(xs) => Value::Array(xs.iter().map(val_to_json).collect()),
-        Val::Option(o) => o.as_deref().map(val_to_json).unwrap_or(Value::Null),
+        Val::Option(o) => o.as_deref().map_or(Value::Null, val_to_json),
         Val::Resource(_) => json!({ "$resource": true }),
         other => json!(format!("{other:?}")),
     }
 }
 
 /// Extract a `{"$handle": <id>}` resource handle id from a JSON value.
+#[allow(clippy::cast_possible_truncation)]
 fn handle_id(v: Option<&Value>) -> Option<u32> {
     v?.get("$handle")?.as_u64().map(|id| id as u32)
 }
@@ -575,8 +579,8 @@ fn err_to_js(err: impl std::fmt::Debug) -> JsError {
 }
 
 /// Wrap a plain error string as a thrown JS `Error`.
-fn js_err(msg: String) -> JsError {
-    JsError::new(&msg)
+fn js_err(msg: &str) -> JsError {
+    JsError::new(msg)
 }
 
 /// `tracing` → `console.log` bridge. `tracing_subscriber`'s `fmt` layer asks a

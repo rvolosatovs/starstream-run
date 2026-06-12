@@ -201,7 +201,7 @@ pub fn link_abi_event_function<T: EventHandler>(
 pub fn link_instance<T: EventHandler>(
     engine: &Engine,
     linker: &mut LinkerInstance<T>,
-    ty: types::ComponentInstance,
+    ty: &types::ComponentInstance,
     instance: &str,
 ) -> wasmtime::Result<()> {
     if let Some(_utxo) = ty.get_export(engine, "utxo") {
@@ -237,7 +237,7 @@ pub fn link_instance<T: EventHandler>(
 pub fn link_dynamic_imports<T: EventHandler>(
     engine: &Engine,
     linker: &mut Linker<T>,
-    ty: types::Component,
+    ty: &types::Component,
 ) -> wasmtime::Result<()> {
     for (name, types::ComponentExtern { ty, .. }) in ty.imports(engine) {
         if let Some(("starstream:std", ..)) = name.split_once('/') {
@@ -258,7 +258,7 @@ pub fn link_dynamic_imports<T: EventHandler>(
                     .instance(name)
                     .with_context(|| format!("failed to instantiate `{name}` in the linker"))?;
                 debug!(?name, "linking root instance");
-                link_instance(engine, &mut linker, ty, name)?;
+                link_instance(engine, &mut linker, &ty, name)?;
             }
             types::ComponentItem::Type(..) => {}
             types::ComponentItem::Resource(..) => {
@@ -314,7 +314,7 @@ impl<T: Host> Contract<T> {
         debug!("linking component imports");
         bindings::Host_::add_to_linker::<_, HasSelf<_>>(&mut linker, |cx| cx)
             .context("failed to link builtins")?;
-        link_dynamic_imports(&engine, &mut linker, component.component_type())?;
+        link_dynamic_imports(&engine, &mut linker, &component.component_type())?;
 
         let ty = linker
             .substituted_component_type(&component)
@@ -759,6 +759,7 @@ pub struct UtxoStorageExport {
 }
 
 impl UtxoStorageExport {
+    #[must_use]
     pub fn ty(&self) -> &types::Record {
         &self.ty
     }
@@ -773,6 +774,7 @@ pub struct UtxoExport {
 }
 
 impl UtxoExport {
+    #[must_use]
     pub fn storage(&self) -> Option<&UtxoStorageExport> {
         self.storage.as_ref()
     }
@@ -785,6 +787,7 @@ pub struct ConstructorExport {
 }
 
 impl ConstructorExport {
+    #[must_use]
     pub fn ty(&self) -> &types::ComponentFunc {
         &self.ty
     }
@@ -797,6 +800,7 @@ pub struct MethodExport {
 }
 
 impl MethodExport {
+    #[must_use]
     pub fn ty(&self) -> &types::ComponentFunc {
         &self.ty
     }
@@ -827,6 +831,7 @@ impl<T: 'static> Utxo<T> {
         &mut self.store
     }
 
+    #[must_use]
     pub fn resource(&self) -> ResourceAny {
         self.resource
     }
