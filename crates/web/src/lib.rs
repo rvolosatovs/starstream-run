@@ -585,11 +585,12 @@ fn js_err(msg: String) -> JsError {
     JsError::new(&msg)
 }
 
-/// `tracing` → on-page log panel bridge. `tracing_subscriber`'s `fmt` layer
-/// asks a [`MakeWriter`] for a fresh writer per event; we buffer the formatted
-/// line and append it to the page's `#log` element when that writer is dropped
-/// (mirroring it to the browser console too). Lines are tagged with a
-/// per-level CSS class so the page can colour them.
+/// `tracing` → `console.log` bridge. `tracing_subscriber`'s `fmt` layer asks a
+/// [`MakeWriter`] for a fresh writer per event; we buffer the formatted line
+/// and write it to the console when that writer is dropped. The runtime runs
+/// inside a Web Worker (see `web/contract.worker.js`), which forwards these
+/// console lines to the page so each contract's log panel can colour them by
+/// the level token the line starts with.
 struct MakeConsoleWriter;
 
 impl<'a> MakeWriter<'a> for MakeConsoleWriter {
@@ -619,40 +620,8 @@ impl Drop for ConsoleWriter {
             return;
         }
         let msg = String::from_utf8_lossy(&self.0);
-        let line = msg.trim_end();
-        // Mirror to the console as a fallback for anyone with devtools open.
-        web_sys::console::log_1(&JsValue::from_str(line));
-        append_to_page(line);
-    }
-}
-
-/// Append a formatted log line to the page's `#log` element, keeping it
-/// scrolled to the bottom. The panel is always visible (see `index.html`). A
-/// no-op if the DOM isn't there (e.g. headless contexts); logging must never
-/// break a run.
-fn append_to_page(line: &str) {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let Some(log) = document.get_element_by_id("log") else {
-        return;
-    };
-    let Ok(entry) = document.create_element("div") else {
-        return;
-    };
-    // The fmt layer (no ANSI, no timestamp) emits `LEVEL target: message`, so
-    // the first whitespace-delimited token is the level.
-    let class = match line.split_whitespace().next() {
-        Some("ERROR") => "log-line log-error",
-        Some("WARN") => "log-line log-warn",
-        Some("INFO") => "log-line log-info",
-        Some("DEBUG") => "log-line log-debug",
-        Some("TRACE") => "log-line log-trace",
-        _ => "log-line",
-    };
-    entry.set_class_name(class);
-    entry.set_text_content(Some(line));
-    if log.append_child(&entry).is_ok() {
-        log.set_scroll_top(log.scroll_height());
+        // The worker (web/contract.worker.js) patches `console` to forward
+        // these lines to the page, which colours them by their level token.
+        web_sys::console::log_1(&JsValue::from_str(msg.trim_end()));
     }
 }

@@ -17,13 +17,7 @@ tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 wasm-bindgen = { workspace = true, features = ["std"] }
 wasm-bindgen-futures = { workspace = true, features = ["std"] }
 wasmtime = { workspace = true }
-web-sys = { workspace = true, features = [
-    "console",
-    "Window",
-    "Document",
-    "Element",
-    "Node",
-] }
+web-sys = { workspace = true, features = ["console"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 starstream-run = { workspace = true, features = [

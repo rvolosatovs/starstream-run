@@ -30,7 +30,7 @@
         justify-content: center;
         padding: 2rem 1rem;
       }
-      main { width: 100%; max-width: 720px; }
+      main { width: 100%; max-width: 760px; }
       h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
       p.lead { color: var(--muted); margin: 0 0 1.5rem; }
       .drop {
@@ -57,8 +57,8 @@
         cursor: pointer;
       }
       button:disabled { opacity: 0.5; cursor: default; }
-      #cardano {
-        margin-top: 1.25rem;
+      .cardano {
+        margin-top: 1rem;
         border: 1px solid #3f3f46;
         border-radius: 10px;
         padding: 0.75rem 1.25rem 1rem;
@@ -66,16 +66,16 @@
         gap: 1.5rem;
         flex-wrap: wrap;
       }
-      #cardano > legend {
+      .cardano > legend {
         font-size: 0.78rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         color: var(--muted);
         padding: 0 0.4rem;
       }
-      #cardano .field { gap: 0.25rem; }
-      #cardano label { font-size: 0.8rem; color: var(--muted); }
-      #cardano input {
+      .cardano .field { gap: 0.25rem; }
+      .cardano label { font-size: 0.8rem; color: var(--muted); }
+      .cardano input {
         font: inherit;
         font-size: 0.9rem;
         color: var(--fg);
@@ -108,22 +108,56 @@
       }
       .links a { text-decoration: none; }
       .links a:hover { text-decoration: underline; }
-      #log {
+
+      /* One loaded contract = one Web Worker = one card. */
+      #contracts:empty { display: none; }
+      .contract-card {
+        border: 1px solid #3f3f46;
+        border-radius: 12px;
+        padding: 1rem 1.25rem 1.25rem;
+        margin-top: 1.5rem;
+        background: #1f1f23;
+      }
+      .contract-head {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      .contract-filename {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-weight: 600;
+        color: var(--accent);
+        word-break: break-all;
+      }
+      .contract-status { color: var(--muted); font-size: 0.85rem; }
+      .contract-status.ok { color: var(--ok); }
+      .contract-status.err { color: var(--err); }
+      .contract-head .terminate-btn {
+        margin: 0 0 0 auto;
+        background: transparent;
+        color: var(--err);
+        border: 1px solid var(--err);
+        padding: 0.25rem 0.7rem;
+        font-size: 0.8rem;
+      }
+      .log {
         background: var(--panel);
         border-radius: 8px;
         padding: 0.75rem 1rem;
-        margin: 0.75rem 0 0;
-        max-height: 22rem;
+        margin: 0.4rem 0 0;
+        max-height: 18rem;
         overflow: auto;
         font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         white-space: pre-wrap;
         word-break: break-word;
       }
-      #log:empty::before {
+      .log:empty::before {
         content: "No log output yet.";
         color: var(--muted);
         font-style: italic;
       }
+      .log-title { font-size: 0.95rem; margin: 1.25rem 0 0; }
       .log-line { color: var(--fg); }
       .log-error { color: var(--err); }
       .log-warn { color: var(--warn); }
@@ -132,8 +166,8 @@
       .log-trace { color: var(--trace); }
 
       /* Interactive contract surface */
-      #contract { margin-top: 1.5rem; }
-      #contract:empty { display: none; }
+      .contract { margin-top: 1rem; }
+      .contract:empty { display: none; }
       .instance {
         border: 1px solid #3f3f46;
         border-radius: 10px;
@@ -247,8 +281,8 @@
     <main>
       <h1>starstream-run</h1>
       <p class="lead">
-        Load, link and instantiate a Starstream contract in the browser — run
-        entirely client-side via wasmtime's Pulley interpreter.
+        Load, link and instantiate Starstream contracts in the browser — each
+        runs in its own Web Worker via wasmtime's Pulley interpreter.
       </p>
 
       <nav class="links">
@@ -257,147 +291,98 @@
       </nav>
 
       <label class="drop" id="drop">
-        <input type="file" id="file" accept=".wasm,application/wasm" />
-        <div>Drop a <strong>.wasm</strong> file here, or click to choose one</div>
-        <div id="filename" style="color: var(--muted); margin-top: 0.5rem"></div>
+        <input type="file" id="file" accept=".wasm,application/wasm" multiple />
+        <div>Drop <strong>.wasm</strong> files here, or click to choose — each one loads as its own contract</div>
       </label>
-      <p style="color: var(--muted); margin: 0.75rem 0 0; font-size: 0.85rem">
-        Defaults to the bundled <code>score.wasm</code> example contract.
-      </p>
-
-      <fieldset id="cardano">
-        <legend>Cardano context</legend>
-        <div class="field">
-          <label for="block-height">block height</label>
-          <input type="number" id="block-height" step="1" min="0" value="0" />
-        </div>
-        <div class="field">
-          <label for="current-slot">current slot</label>
-          <input type="number" id="current-slot" step="1" min="0" value="0" />
-        </div>
-      </fieldset>
-
       <div>
-        <button id="run" disabled>Load &amp; inspect</button>
+        <button id="add-default" disabled>Add the bundled score.wasm example</button>
       </div>
 
       <div class="status" id="status">Loading runtime…</div>
-      <pre id="output" hidden></pre>
 
-      <div id="contract"></div>
-
-      <h2 style="font-size: 1rem; margin: 1.5rem 0 0.25rem">Log</h2>
-      <div id="log"></div>
+      <div id="contracts"></div>
 
       <footer>
         Accepts a full component or a core module with a <code>component-type</code>
-        custom section. After instantiation, every exported instance that owns a
-        resource is listed below: call a constructor (e.g. <code>new</code>) to
-        mint a handle, then invoke its methods. Detailed trace logs appear in the
-        panel above.
+        custom section. Each loaded contract gets its own Web Worker; within a
+        contract, every exported instance that owns a resource is listed: call a
+        constructor (e.g. <code>new</code>) to mint a handle, then invoke its
+        methods. Per-contract trace logs appear at the bottom of each card.
       </footer>
     </main>
 
-    <!-- The runtime module imports wasmtime's custom-fiber hooks from the
-         bare module specifier "env" (see crates/web/src/fiber.rs); map it to
-         the JSPI glue. Must precede the module script below. -->
-    <script type="importmap">
-      { "imports": { "env": "./fiber-env.js" } }
-    </script>
     <script type="module">
-      import init, { instantiate } from "./pkg/starstream_run_web.js";
-      import { setup as setupFibers } from "env";
+      // The runtime (~11 MB) is compiled once on the main thread and the
+      // resulting WebAssembly.Module is structured-cloned to every Worker, so
+      // adding a contract spawns a Worker that instantiates without recompiling.
+      // The Worker loads ./pkg/starstream_run_web.js, whose generated glue
+      // imports ../fiber-env.js directly (see crates/web/src/fiber.rs) — no
+      // import map, which is what makes it work inside a Worker realm.
 
       const fileInput = document.getElementById("file");
       const drop = document.getElementById("drop");
-      const filename = document.getElementById("filename");
-      const runBtn = document.getElementById("run");
+      const addDefaultBtn = document.getElementById("add-default");
       const status = document.getElementById("status");
-      const output = document.getElementById("output");
-      const log = document.getElementById("log");
-      const contractEl = document.getElementById("contract");
-      const blockHeightInput = document.getElementById("block-height");
-      const currentSlotInput = document.getElementById("current-slot");
-
-      // Cardano context (`s64` host functions) reported to guests. Read the two
-      // form fields, defaulting blanks to 0, and push them into the live
-      // contract; `setCardano` takes `i64`, so values cross as BigInt. Applied
-      // to UTXOs minted after the call.
-      function applyCardano() {
-        if (!contract) return;
-        const read = (input) => {
-          const v = input.value.trim();
-          return BigInt(v === "" ? 0 : Math.trunc(Number(v)));
-        };
-        contract.setCardano(read(blockHeightInput), read(currentSlotInput));
-      }
-
-      for (const input of [blockHeightInput, currentSlotInput]) {
-        input.addEventListener("change", applyCardano);
-      }
-
-      function clearLog() {
-        log.textContent = "";
-      }
-
-      let bytes = null;
-      // The live, instantiated contract (a wasm-bindgen `Contract`), or null.
-      let contract = null;
+      const contractsEl = document.getElementById("contracts");
 
       function setStatus(text, kind = "") {
         status.textContent = text;
         status.className = "status" + (kind ? " " + kind : "");
       }
 
-      function showOutput(text) {
-        if (text) {
-          output.textContent = text;
-          output.hidden = false;
-        } else {
-          output.hidden = true;
-        }
-      }
-
-      function setComponent(name, data) {
-        bytes = data;
-        filename.textContent = `${name} (${data.length.toLocaleString()} bytes)`;
-        runBtn.disabled = false;
-        showOutput(null);
-        contractEl.replaceChildren();
-        contract = null;
-      }
-
-      async function loadFile(file) {
-        if (!file) return;
-        setComponent(file.name, new Uint8Array(await file.arrayBuffer()));
-        setStatus("Ready to load.");
-      }
-
-      // Fetch the bundled example so the page is usable without an upload.
-      async function loadDefault() {
-        const res = await fetch("./score.wasm");
-        if (!res.ok) throw new Error(`HTTP ${res.status} fetching score.wasm`);
-        setComponent("score.wasm", new Uint8Array(await res.arrayBuffer()));
-      }
-
-      fileInput.addEventListener("change", (e) => loadFile(e.target.files[0]));
-
-      drop.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        drop.classList.add("over");
-      });
-      drop.addEventListener("dragleave", () => drop.classList.remove("over"));
-      drop.addEventListener("drop", (e) => {
-        e.preventDefault();
-        drop.classList.remove("over");
-        loadFile(e.dataTransfer.files[0]);
-      });
-
       const el = (tag, props = {}, children = []) => {
         const node = Object.assign(document.createElement(tag), props);
         for (const c of children) node.append(c);
         return node;
       };
+
+      // ----- A contract proxy: RPC over its Web Worker --------------------
+      // Exposes the same async surface as the wasm-bindgen `Contract`, so the
+      // render code below is oblivious to the Worker boundary.
+
+      class ContractProxy {
+        constructor(module, onLog) {
+          this.worker = new Worker("./contract.worker.js", { type: "module" });
+          this.nextId = 0;
+          this.pending = new Map();
+          this.ready = new Promise((resolve, reject) => {
+            this._readyResolve = resolve;
+            this._readyReject = reject;
+          });
+          this.worker.onmessage = ({ data }) => {
+            if (data.type === "log") return onLog(data.text);
+            if (data.type === "ready") return this._readyResolve();
+            if (data.type === "boot-error") return this._readyReject(new Error(data.error));
+            const p = this.pending.get(data.id);
+            if (!p) return;
+            this.pending.delete(data.id);
+            data.ok ? p.resolve(data.result) : p.reject(new Error(data.error));
+          };
+          this.worker.onerror = (e) =>
+            this._readyReject(new Error(e.message || "worker error"));
+          this.worker.postMessage({ type: "boot", module });
+        }
+
+        #rpc(op, payload = {}) {
+          const id = this.nextId++;
+          return new Promise((resolve, reject) => {
+            this.pending.set(id, { resolve, reject });
+            this.worker.postMessage({ id, op, ...payload });
+          });
+        }
+
+        instantiate(bytes) { return this.#rpc("instantiate", { bytes }); }
+        describe() { return this.#rpc("describe"); }
+        call(instance, func, args) { return this.#rpc("call", { instance, func, args }); }
+        loadUtxo(instance, storage) { return this.#rpc("loadUtxo", { instance, storage }); }
+        storageGet(handle) { return this.#rpc("storageGet", { handle }); }
+        storageSet(handle, value) { return this.#rpc("storageSet", { handle, value }); }
+        dropResource(handle) { return this.#rpc("dropResource", { handle }); }
+        setCardano(blockHeight, currentSlot) {
+          return this.#rpc("setCardano", { blockHeight, currentSlot });
+        }
+        terminate() { this.worker.terminate(); }
+      }
 
       // ----- Input widgets, built from a simplified `kind` string ----------
       // Each builder returns { node, read() } where read() yields the JSON
@@ -476,8 +461,9 @@
         return { node, read: () => [...prefix(), ...inputs.map((i) => i.input.read())] };
       }
 
-      // Render one callable function (constructor or method) as a panel.
-      function renderFunc(instanceName, func, prefix, onResult) {
+      // Render one callable function (constructor or method) as a panel. `cx`
+      // is the ContractProxy the call is routed to.
+      function renderFunc(cx, instanceName, func, prefix, onResult) {
         const result = el("div", { className: "result" });
         const params = buildParams(func.params, prefix);
         const button = el("button", { type: "button", textContent: "Call" });
@@ -492,7 +478,7 @@
             return;
           }
           try {
-            const raw = await contract.call(instanceName, func.export, JSON.stringify(args));
+            const raw = await cx.call(instanceName, func.export, JSON.stringify(args));
             const results = JSON.parse(raw);
             result.className = "result ok";
             result.textContent = results.length ? JSON.stringify(results, null, 2) : "(no return value)";
@@ -510,13 +496,13 @@
         ]);
       }
 
-      // Render the interactive surface for the whole contract.
-      function renderContract(api) {
-        contractEl.replaceChildren();
+      // Render the interactive surface for one contract into `bodyEl`.
+      function renderContract(cx, bodyEl, api) {
+        bodyEl.replaceChildren();
 
         const instances = api.instances ?? [];
         if (!instances.length) {
-          contractEl.append(
+          bodyEl.append(
             el("p", { className: "lead", textContent: "Instantiated — but no exported instance owns a `utxo` resource to interact with." }),
           );
           return;
@@ -533,7 +519,7 @@
           // Live handles for this resource, with their method/storage panels.
           const handlesEl = el("div", { className: "handles" });
           const addHandle = (id) => {
-            handlesEl.append(renderHandle(instance, id));
+            handlesEl.append(renderHandle(cx, instance, id));
           };
 
           // A UTXO can be minted two ways: by calling a `[static]` constructor,
@@ -542,23 +528,23 @@
           if (instance.constructors.length || instance.storage) {
             resNode.append(el("p", { className: "subhead", textContent: "Construct" }));
             for (const func of instance.constructors) {
-              resNode.append(renderFunc(instance.name, func, () => [], addHandle));
+              resNode.append(renderFunc(cx, instance.name, func, () => [], addHandle));
             }
             if (instance.storage) {
-              resNode.append(renderLoadFromStorage(instance, addHandle));
+              resNode.append(renderLoadFromStorage(cx, instance, addHandle));
             }
           }
 
           resNode.append(el("p", { className: "subhead", textContent: "Live handles" }));
           resNode.append(handlesEl);
           instNode.append(resNode);
-          contractEl.append(instNode);
+          bodyEl.append(instNode);
         }
       }
 
       // Render a "from storage" constructor panel: one scalar input per storage
       // field plus a Load button that mints a fresh handle via `loadUtxo`.
-      function renderLoadFromStorage(instance, onResult) {
+      function renderLoadFromStorage(cx, instance, onResult) {
         const result = el("div", { className: "result" });
         const inputs = instance.storage.map((f) => ({ name: f.name, input: buildInput(f.kind) }));
         const form = el(
@@ -579,7 +565,7 @@
             return;
           }
           try {
-            const raw = await contract.loadUtxo(instance.name, JSON.stringify(obj));
+            const raw = await cx.loadUtxo(instance.name, JSON.stringify(obj));
             const results = JSON.parse(raw);
             result.className = "result ok";
             result.textContent = "(loaded from storage)";
@@ -599,7 +585,7 @@
 
       // Render a single live handle card: one panel per method, plus a storage
       // section when the resource owns one.
-      function renderHandle(instance, id) {
+      function renderHandle(cx, instance, id) {
         const card = el("div", { className: "handle" });
         const dropBtn = el("button", { type: "button", className: "drop-btn", textContent: "drop" });
         card.append(
@@ -613,7 +599,7 @@
           dropBtn.disabled = true;
           try {
             // Runs the guest's resource destructor — async (a Promise).
-            await contract.dropResource(id);
+            await cx.dropResource(id);
           } catch (err) {
             // Surface the failure but still remove the card from the UI.
             console.warn("dropResource failed", err);
@@ -624,28 +610,28 @@
         const handleRef = () => [{ $handle: id }];
         if (instance.methods.length) {
           for (const func of instance.methods) {
-            card.append(renderFunc(instance.name, func, handleRef));
+            card.append(renderFunc(cx, instance.name, func, handleRef));
           }
         } else {
           card.append(el("p", { className: "subhead", textContent: "(no methods)" }));
         }
 
         if (instance.storage) {
-          card.append(renderStorage(id, instance.storage));
+          card.append(renderStorage(cx, id, instance.storage));
         }
         return card;
       }
 
       // Render a handle's `storage` panel: a Get button (read) and a Set form
       // (one scalar input per field).
-      function renderStorage(id, fields) {
+      function renderStorage(cx, id, fields) {
         const result = el("div", { className: "result" });
 
         const getBtn = el("button", { type: "button", textContent: "Get" });
         getBtn.addEventListener("click", async () => {
           try {
             result.className = "result ok";
-            result.textContent = JSON.stringify(JSON.parse(await contract.storageGet(id)), null, 2);
+            result.textContent = JSON.stringify(JSON.parse(await cx.storageGet(id)), null, 2);
           } catch (err) {
             result.className = "result err";
             result.textContent = String(err.message ?? err);
@@ -671,7 +657,7 @@
             return;
           }
           try {
-            await contract.storageSet(id, JSON.stringify(obj));
+            await cx.storageSet(id, JSON.stringify(obj));
             result.className = "result ok";
             result.textContent = "(storage set)";
           } catch (err) {
@@ -688,39 +674,141 @@
         ]);
       }
 
-      runBtn.addEventListener("click", () => {
-        if (!bytes) return;
-        setStatus("Instantiating…");
-        showOutput(null);
-        clearLog();
-        contractEl.replaceChildren();
-        // Yield so the status paints before the (synchronous) instantiation.
-        requestAnimationFrame(() => {
-          try {
-            contract = instantiate(bytes);
-            applyCardano();
-            const api = JSON.parse(contract.describe());
-            renderContract(api);
-            setStatus("Instantiated. Interact with the contract below.", "ok");
-          } catch (err) {
-            contract = null;
-            setStatus("Instantiation failed:", "err");
-            showOutput(String(err.message ?? err));
-          }
-        });
-      });
+      // Append a worker log line to a card's log panel, colouring by the level
+      // token the tracing fmt layer emits as the first word (`INFO …`).
+      const LOG_CLASS = {
+        ERROR: "log-error",
+        WARN: "log-warn",
+        INFO: "log-info",
+        DEBUG: "log-debug",
+        TRACE: "log-trace",
+      };
+      function appendLog(logEl, line) {
+        const level = line.trimStart().split(/\s+/, 1)[0];
+        const entry = el("div", { className: "log-line " + (LOG_CLASS[level] ?? "") });
+        entry.textContent = line;
+        logEl.append(entry);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
 
-      // `init()` fetches and instantiates the ~11 MB runtime module; its
-      // exports feed the JSPI fiber glue (which guest calls suspend through).
-      // Then preload the bundled example so the page is usable right away.
-      init()
-        .then(setupFibers)
-        .then(loadDefault)
-        .then(() => setStatus("Ready to load score.wasm — or choose another .wasm file."))
-        .catch((err) => {
-          setStatus("Failed to load runtime:", "err");
-          showOutput(String(err));
+      // ----- Per-contract card --------------------------------------------
+
+      // Build a card's DOM and return the bits the loader wires up.
+      function makeCard(name) {
+        const statusEl = el("span", { className: "contract-status", textContent: "starting worker…" });
+        const terminateBtn = el("button", { type: "button", className: "terminate-btn", textContent: "terminate" });
+        const blockHeight = el("input", { type: "number", step: "1", min: "0", value: "0" });
+        const currentSlot = el("input", { type: "number", step: "1", min: "0", value: "0" });
+        const bodyEl = el("div", { className: "contract" });
+        const logEl = el("div", { className: "log" });
+
+        const root = el("div", { className: "contract-card" }, [
+          el("div", { className: "contract-head" }, [
+            el("span", { className: "contract-filename", textContent: name }),
+            statusEl,
+            terminateBtn,
+          ]),
+          el("fieldset", { className: "cardano" }, [
+            el("legend", { textContent: "Cardano context" }),
+            el("div", { className: "field" }, [el("label", { textContent: "block height" }), blockHeight]),
+            el("div", { className: "field" }, [el("label", { textContent: "current slot" }), currentSlot]),
+          ]),
+          bodyEl,
+          el("h3", { className: "log-title", textContent: "Log" }),
+          logEl,
+        ]);
+
+        return { root, statusEl, terminateBtn, blockHeight, currentSlot, bodyEl, logEl };
+      }
+
+      // The compiled runtime module, shared by every Worker.
+      let runtimeModule = null;
+
+      // Load a contract: spawn its Worker, instantiate the bytes, and render.
+      async function addContract(name, bytes) {
+        if (!runtimeModule) return;
+        const card = makeCard(name);
+        contractsEl.prepend(card.root);
+
+        const setCardStatus = (text, kind = "") => {
+          card.statusEl.textContent = text;
+          card.statusEl.className = "contract-status" + (kind ? " " + kind : "");
+        };
+
+        const cx = new ContractProxy(runtimeModule, (line) => appendLog(card.logEl, line));
+
+        // Push the card's Cardano fields into the worker; applies to UTXOs
+        // minted afterwards. `setCardano` takes i64, so values cross as BigInt.
+        const applyCardano = () => {
+          const read = (input) => {
+            const v = input.value.trim();
+            return BigInt(v === "" ? 0 : Math.trunc(Number(v)));
+          };
+          return cx.setCardano(read(card.blockHeight), read(card.currentSlot));
+        };
+        for (const input of [card.blockHeight, card.currentSlot]) {
+          input.addEventListener("change", () => applyCardano());
+        }
+
+        card.terminateBtn.addEventListener("click", () => {
+          cx.terminate();
+          card.root.remove();
         });
+
+        try {
+          setCardStatus("instantiating…");
+          await cx.ready;
+          await cx.instantiate(bytes);
+          await applyCardano();
+          const api = JSON.parse(await cx.describe());
+          renderContract(cx, card.bodyEl, api);
+          setCardStatus("instantiated", "ok");
+        } catch (err) {
+          setCardStatus("failed: " + String(err.message ?? err), "err");
+        }
+      }
+
+      async function addFiles(files) {
+        for (const file of files) {
+          if (!file) continue;
+          addContract(file.name, new Uint8Array(await file.arrayBuffer()));
+        }
+      }
+
+      // Fetch the bundled example and load it as a contract.
+      async function addDefault() {
+        const res = await fetch("./score.wasm");
+        if (!res.ok) throw new Error(`HTTP ${res.status} fetching score.wasm`);
+        addContract("score.wasm", new Uint8Array(await res.arrayBuffer()));
+      }
+
+      fileInput.addEventListener("change", (e) => {
+        addFiles(e.target.files);
+        fileInput.value = ""; // allow re-selecting the same file
+      });
+      drop.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        drop.classList.add("over");
+      });
+      drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+      drop.addEventListener("drop", (e) => {
+        e.preventDefault();
+        drop.classList.remove("over");
+        addFiles(e.dataTransfer.files);
+      });
+      addDefaultBtn.addEventListener("click", () =>
+        addDefault().catch((err) => setStatus(String(err), "err")),
+      );
+
+      // Compile the runtime once; contracts are loaded on demand (drop a file
+      // or click the example button) — nothing is instantiated automatically.
+      WebAssembly.compileStreaming(fetch("./pkg/starstream_run_web_bg.wasm"))
+        .then((module) => {
+          runtimeModule = module;
+          addDefaultBtn.disabled = false;
+          setStatus("Runtime ready — drop a .wasm file, or load the example.");
+        })
+        .catch((err) => setStatus("Failed to load runtime: " + String(err), "err"));
     </script>
   </body>
 </html>

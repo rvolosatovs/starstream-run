@@ -1,32 +1,20 @@
-// Drive the wasm-bindgen bundle the same way web/index.html does, but from
-// Node, to reproduce browser-side traps with a usable stack.
+// Drive the wasm-bindgen bundle the way a contract Worker does, but from Node,
+// to reproduce browser-side traps with a usable stack.
 //
 // Requires JSPI for the wasmtime fiber glue:
 //   node --experimental-wasm-jspi repro.mjs   (Node ≥ 24)
 import { readFile } from "node:fs/promises";
-import { registerHooks } from "node:module";
 
 if (typeof WebAssembly.Suspending !== "function") {
   console.error("JSPI is unavailable — run with: node --experimental-wasm-jspi repro.mjs");
   process.exit(1);
 }
 
-// The bundle imports the JSPI fiber glue as the bare specifier "env" (the
-// browser resolves it via the import map in index.html); point it at
-// fiber-env.js here. Registered before the bundle is imported, hence the
-// dynamic imports below.
-const envUrl = new URL("./web/fiber-env.js", import.meta.url).href;
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === "env") {
-      return { url: envUrl, shortCircuit: true };
-    }
-    return nextResolve(specifier, context);
-  },
-});
-
-const { default: init, instantiate } = await import("./web/pkg/starstream_run_web.js");
-const { setup: setupFibers } = await import("env");
+// The generated glue imports the JSPI fiber glue from ../fiber-env.js directly
+// (a relative specifier — see crates/web/src/fiber.rs), so no module-resolution
+// shim is needed here; it resolves the same in Node as in the browser/Worker.
+import init, { instantiate } from "./web/pkg/starstream_run_web.js";
+import { setup as setupFibers } from "./web/fiber-env.js";
 
 const wasm = await readFile(new URL("./web/pkg/starstream_run_web_bg.wasm", import.meta.url));
 setupFibers(await init({ module_or_path: wasm }));

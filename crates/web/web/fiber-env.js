@@ -2,12 +2,12 @@
 // JSPI (WebAssembly.Suspending / WebAssembly.promising), plus the `drive`
 // runner the Rust side (`src/fiber.rs`) ships suspendable jobs to.
 //
-// The runtime module imports `fiber_init`/`fiber_switch` from the wasm module
-// `env` (its Rust shims in `src/fiber.rs` forward wasmtime's
-// `wasmtime_fiber_init`/`wasmtime_fiber_switch` hooks to them), and wasm-bindgen
-// turns that into an ES import of the bare specifier "env" — which resolves to
-// this file via the import map in `index.html` (browser) or the resolve hook in
-// `repro.mjs` (Node).
+// The runtime module imports `fiber_init`/`fiber_switch` from this file (its
+// Rust shims in `src/fiber.rs` forward wasmtime's
+// `wasmtime_fiber_init`/`wasmtime_fiber_switch` hooks to them). `src/fiber.rs`
+// declares the import module as the relative specifier `../fiber-env.js`, so
+// the wasm-bindgen output imports this file directly — no import map needed,
+// which is what lets each contract's Worker (its own realm) load the runtime.
 //
 // Each fiber record's `slot` holds the parked "other side" for that fiber's
 // top-of-stack; a switch parks the caller, swaps the shadow-stack pointer,

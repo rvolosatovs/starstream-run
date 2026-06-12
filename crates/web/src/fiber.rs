@@ -7,13 +7,14 @@
 //! `wasmtime_fiber_init` and `wasmtime_fiber_switch`. Wasmtime references those
 //! as plain `extern "C"` symbols; we *define* them here (just as
 //! [`crate::wasmtime`] defines the `custom-virtual-memory` hooks), as thin
-//! shims that forward to the JS implementations imported from the `env` module
-//! as `fiber_init` / `fiber_switch`. Defining them on our side — rather than
-//! relying on wasmtime declaring them as `env` imports itself — keeps the whole
-//! embedder ABI owned by this crate. The JS half lives in
-//! [`web/fiber-env.js`](../web/fiber-env.js) — resolved as the bare module
-//! specifier `env` via the import map in `index.html` (or the resolve hook in
-//! `repro.mjs` under Node) — and implements them with JSPI
+//! shims that forward to the JS implementations imported from
+//! [`web/fiber-env.js`](../web/fiber-env.js) as `fiber_init` / `fiber_switch`.
+//! Defining them on our side — rather than relying on wasmtime declaring them
+//! as imports itself — keeps the whole embedder ABI owned by this crate. The
+//! JS half is imported by the wasm-bindgen output via the *relative* specifier
+//! `../fiber-env.js` (the glue lives one directory up from the generated
+//! `pkg/`), so it resolves with no import map — in the page, in a Worker, and
+//! under Node alike. It implements the hooks with JSPI
 //! (`WebAssembly.Suspending` / `WebAssembly.promising`): the browser engine
 //! does the actual stack switching, and the glue swaps this module's
 //! shadow-stack pointer (`__stack_pointer`, exported via a link arg in
@@ -65,7 +66,11 @@ pub unsafe extern "C" fn starstream_fiber_run(job: usize) {
     job();
 }
 
-#[wasm_bindgen(module = "env")]
+// `raw_module` (not `module`): emit the specifier verbatim. `module` rejects
+// relative paths ("relative module paths aren't supported yet"); `raw_module`
+// passes `../fiber-env.js` straight through, resolving against the generated
+// `pkg/` dir with no import map.
+#[wasm_bindgen(raw_module = "../fiber-env.js")]
 extern "C" {
     /// Queue `job` to run on a fresh `promising`-wrapped
     /// [`starstream_fiber_run`] activation. The returned promise settles once
@@ -80,7 +85,7 @@ extern "C" {
 }
 
 #[cfg(target_family = "wasm")]
-#[link(wasm_import_module = "env")]
+#[link(wasm_import_module = "../fiber-env.js")]
 unsafe extern "C" {
     /// Register a new fiber whose stack spans up to `top_of_stack`, scheduled
     /// to run `entry(entry_arg0, top_of_stack)` once it is first switched to.
