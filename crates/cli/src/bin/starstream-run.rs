@@ -1,3 +1,5 @@
+use core::iter::zip;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -6,7 +8,7 @@ use clap::{Parser, Subcommand};
 use starstream_run::Contract;
 use starstream_run_cli::{CardanoCtx, Ctx, method_hash};
 use wasmtime::AsContext as _;
-use wasmtime::component::{Type, wasm_wave};
+use wasmtime::component::{Type, types, wasm_wave};
 
 /// Run a Wasm component.
 #[derive(Debug, Parser)]
@@ -58,28 +60,6 @@ enum Command {
     },
 }
 
-/// Parse WAVE-encoded `args` against the expected `types`, one value per
-/// argument.
-fn parse_vals<'a>(
-    what: &str,
-    types: impl ExactSizeIterator<Item = (&'a str, Type)>,
-    args: &[String],
-) -> anyhow::Result<Vec<wasmtime::component::Val>> {
-    ensure!(
-        types.len() == args.len(),
-        "expected {} {what}(s), got {}",
-        types.len(),
-        args.len(),
-    );
-    types
-        .zip(args)
-        .map(|((name, ty), arg)| {
-            wasm_wave::from_str(&ty, arg)
-                .with_context(|| format!("failed to parse {what} `{name}` from `{arg}`"))
-        })
-        .collect()
-}
-
 /// Render a component-model [`Type`] as WIT. `wasm_wave`'s `DisplayType` covers
 /// the structural types but renders resource handles as `<<UNSUPPORTED>>`; the
 /// `utxo` resource is the only one in play here, so spell its handles by name.
@@ -114,34 +94,6 @@ fn wit_func(export: &str, ty: &wasmtime::component::types::ComponentFunc) -> Str
     format!("{name}: func({params}){ret};")
 }
 
-/// Print the methods this instantiation declared via `implements-method` as a
-/// self-contained WIT document: an interface (named by the export's interface
-/// id) of the methods as free functions.
-fn print_wit(
-    contract: &Contract<Ctx>,
-    name: &str,
-    export: &starstream_run::UtxoExport,
-    implemented: &std::collections::HashSet<starstream_run_cli::MethodHash>,
-) -> anyhow::Result<()> {
-    // A UTXO's methods live in the `starstream:utxo` package by convention,
-    // regardless of the package the guest's component happens to declare. Take
-    // just the interface segment of the export id (`ns:pkg/iface@ver` → `iface`).
-    let iface = name.rsplit_once('/').map_or(name, |(_, iface)| iface);
-    let iface = iface.split_once('@').map_or(iface, |(iface, _)| iface);
-
-    println!("package starstream:utxo;\n");
-    println!("interface {iface} {{");
-    for (name, method) in contract.utxo_methods(export) {
-        let method = method?;
-        // Only advertise methods this instantiation declared it implements.
-        if implemented.contains(&method_hash(name)) {
-            println!("    {}", wit_func(name, method.ty()));
-        }
-    }
-    println!("}}");
-    Ok(())
-}
-
 fn main() -> anyhow::Result<()> {
     let Args {
         cardano_block_height,
@@ -165,10 +117,6 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to read bytes from `{}`", wasm.display()))?;
     let contract = Contract::<Ctx>::new(wasm)?;
 
-    // Resolve the exported instance owning the `utxo` resource: by name if
-    // given, otherwise the contract's only one. Keep the instance's export name
-    // — it is the fully-qualified WIT interface id (e.g.
-    // `starstream:utxo/score-progress`) we render the interface under.
     let (export_name, export) = if let Some(name) = utxo {
         let export = contract.get_utxo(&name)?;
         (name, export)
@@ -177,11 +125,11 @@ fn main() -> anyhow::Result<()> {
         let Some((name, utxo)) = utxos.next() else {
             bail!("contract exports no instance owning a `utxo` resource")
         };
-        let rest: Vec<_> = utxos.map(|(name, ..)| name).collect();
+        let utxos: Vec<_> = utxos.map(|(name, ..)| name).collect();
         ensure!(
-            rest.is_empty(),
+            utxos.is_empty(),
             "contract exports multiple instances owning a `utxo` resource (`{name}`, `{}`); select one with `--utxo`",
-            rest.join("`, `"),
+            utxos.join("`, `"),
         );
         (name.to_string(), utxo?)
     };
@@ -202,7 +150,20 @@ fn main() -> anyhow::Result<()> {
         } => {
             let constructor =
                 contract.get_utxo_constructor(&export, &format!("[static]utxo.{constructor}"))?;
-            let params = parse_vals("parameter", constructor.ty().params(), &params)?;
+
+            let params_ty = constructor.ty().params();
+            ensure!(
+                params_ty.len() == params.len(),
+                "expected {} parameter(s), got {}",
+                params_ty.len(),
+                params.len(),
+            );
+            let params = zip(params_ty, params)
+                .map(|((name, ty), s)| {
+                    wasm_wave::from_str(&ty, &s)
+                        .with_context(|| format!("failed to parse parameter `{name}` from `{s}`"))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
             contract.create_utxo(ctx, &constructor, params)?
         }
         Command::Load { fields, .. } => {
@@ -214,10 +175,10 @@ fn main() -> anyhow::Result<()> {
             let mut cmd = clap::Command::new("load")
                 .about("Reconstruct a UTXO from a stored `storage` record via `set-storage`")
                 .no_binary_name(true);
-            for f in storage.ty().fields() {
+            for types::Field { name, .. } in storage.ty().fields() {
                 cmd = cmd.arg(
-                    clap::Arg::new(f.name.to_string())
-                        .long(f.name.to_string())
+                    clap::Arg::new(name.to_string())
+                        .long(name.to_string())
                         .required(true)
                         .value_name("WAVE"),
                 );
@@ -225,26 +186,41 @@ fn main() -> anyhow::Result<()> {
             let matches = cmd
                 .try_get_matches_from(&fields)
                 .unwrap_or_else(|err| err.exit());
-            let fields = storage
-                .ty()
-                .fields()
-                .map(|f| {
-                    let arg: &String = matches.get_one(f.name).expect("flag is required");
-                    let val = wasm_wave::from_str(&f.ty, arg).with_context(|| {
-                        format!("failed to parse storage field `{}` from `{arg}`", f.name)
+
+            let fields_ty = storage.ty().fields();
+            let fields = fields_ty
+                .map(|types::Field { name, ty }| {
+                    let s = matches
+                        .get_one::<String>(name)
+                        .context("failed to get flag")?;
+                    let v = wasm_wave::from_str(&ty, s).with_context(|| {
+                        format!("failed to parse parameter `{name}` from `{s}`")
                     })?;
-                    Ok((f.name.to_string(), val))
+                    Ok((name.into(), v))
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
+
             contract.load_utxo(ctx, storage, fields)?
         }
     };
 
-    // TODO: serve methods
-    // The methods this instantiation declared via `implements-method` (recorded
-    // in its store's `Ctx` during the guest constructor) gate the WIT listing.
     let implemented = &utxo.as_context().data().implemented;
-    print_wit(&contract, &export_name, &export, implemented)?;
+
+    let (_, instance) = export_name.split_once('/').unwrap_or(("", &export_name));
+    let (instance, ..) = instance.split_once('@').unwrap_or((instance, ""));
+
+    println!("package starstream:utxo;\n");
+    println!("interface {instance} {{");
+    for (name, method) in contract.utxo_methods(&export) {
+        let method = method?;
+        if implemented.contains(&method_hash(name)) {
+            println!("    {}", wit_func(name, method.ty()));
+        }
+    }
+    println!("}}");
+
+    // TODO: serve methods
+
     utxo.drop()?;
     Ok(())
 }

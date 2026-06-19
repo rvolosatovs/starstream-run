@@ -61,6 +61,7 @@ impl bindings::starstream::std::builtin::Host for Ctx {
 /// method is named `[method]utxo.plus-chips` in WIT (`kebab-case`); take the
 /// trailing segment and undo the `kebab-case` mangling (`-` → `_`) to recover
 /// the name the compiler hashed.
+#[must_use]
 pub fn method_hash(export: &str) -> MethodHash {
     let name = export
         .rsplit('.')
