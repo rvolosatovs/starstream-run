@@ -1,14 +1,30 @@
+use core::future::poll_fn;
 use core::iter::zip;
+use core::pin::pin;
+use core::task::Poll;
 
 use std::fs;
+use std::io::stderr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use anyhow::{Context as _, bail, ensure};
+use anyhow::{bail, ensure};
+use bytes::BytesMut;
 use clap::{Parser, Subcommand};
+use futures::StreamExt as _;
+use futures::future::try_join_all;
 use starstream_run::Contract;
+use starstream_run_cli::codec::{ValEncoder, read_value};
 use starstream_run_cli::{CardanoCtx, Ctx, method_hash};
+use tokio::io::AsyncWriteExt as _;
+use tokio::net::TcpListener;
+use tokio::signal;
+use tokio_util::codec::Encoder as _;
+use tracing::{debug, error};
 use wasmtime::AsContext as _;
-use wasmtime::component::{Type, types, wasm_wave};
+use wasmtime::component::{Type, Val, types, wasm_wave};
+use wasmtime::error::Context as _;
+use wrpc_transport::{Serve as _, Server};
 
 /// Run a Wasm component.
 #[derive(Debug, Parser)]
@@ -29,6 +45,11 @@ struct Args {
     /// such instance the contract exports.
     #[arg(long, global = true)]
     utxo: Option<String>,
+
+    /// After minting/loading the UTXO, serve its ABI methods over wRPC framed
+    /// on WebSockets at this address (e.g. `127.0.0.1:8080`), until Ctrl-C.
+    #[arg(long, global = true, value_name = "ADDR")]
+    serve: Option<std::net::SocketAddr>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -94,15 +115,18 @@ fn wit_func(export: &str, ty: &wasmtime::component::types::ComponentFunc) -> Str
     format!("{name}: func({params}){ret};")
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let Args {
         cardano_block_height,
         cardano_current_slot,
         utxo,
+        serve,
         command,
     } = Args::parse();
 
     tracing_subscriber::fmt()
+        .with_writer(stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::builder()
                 .with_default_directive(tracing::level_filters::LevelFilter::INFO.into())
@@ -142,7 +166,7 @@ fn main() -> anyhow::Result<()> {
         cardano,
         ..Default::default()
     };
-    let utxo = match command {
+    let mut utxo = match command {
         Command::New {
             constructor,
             params,
@@ -163,7 +187,7 @@ fn main() -> anyhow::Result<()> {
                     wasm_wave::from_str(&ty, &s)
                         .with_context(|| format!("failed to parse parameter `{name}` from `{s}`"))
                 })
-                .collect::<anyhow::Result<Vec<_>>>()?;
+                .collect::<wasmtime::Result<Vec<_>>>()?;
             contract.create_utxo(ctx, &constructor, params)?
         }
         Command::Load { fields, .. } => {
@@ -204,13 +228,13 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let implemented = &utxo.as_context().data().implemented;
+    let implemented = utxo.as_context().data().implemented.clone();
 
-    let (_, instance) = export_name.split_once('/').unwrap_or(("", &export_name));
-    let (instance, ..) = instance.split_once('@').unwrap_or((instance, ""));
+    let (_, iface) = export_name.split_once('/').unwrap_or(("", &export_name));
+    let (iface, ..) = iface.split_once('@').unwrap_or((iface, ""));
 
     println!("package starstream:utxo;\n");
-    println!("interface {instance} {{");
+    println!("interface {iface} {{");
     for (name, method) in contract.utxo_methods(&export) {
         let method = method?;
         if implemented.contains(&method_hash(name)) {
@@ -219,8 +243,122 @@ fn main() -> anyhow::Result<()> {
     }
     println!("}}");
 
-    // TODO: serve methods
+    if let Some(addr) = serve {
+        let lis = TcpListener::bind(addr)
+            .await
+            .with_context(|| format!("failed to bind `{addr}`"))?;
 
+        let srv = Arc::new(Server::default());
+        let ws = tokio_websockets::ServerBuilder::default();
+        let accept = tokio::spawn({
+            let srv = Arc::clone(&srv);
+            async move {
+                loop {
+                    match lis.accept().await {
+                        Ok((stream, addr)) => {
+                            debug!(?addr, "TCP connection accepted");
+                            let (req, (tx, rx)) = match ws.accept(stream).await {
+                                Ok((req, ws)) => (req, wrpc_websockets::split(ws)),
+                                Err(err) => {
+                                    error!(?err, "failed to perform WebSocket handshake");
+                                    continue;
+                                }
+                            };
+                            if let Err(err) = srv.accept(req, tx, rx).await {
+                                error!(?err, "failed to accept wRPC invocation");
+                            }
+                        }
+                        Err(err) => error!(?err, "failed to accept TCP connection"),
+                    }
+                }
+            }
+        });
+
+        let methods = contract
+            .utxo_methods(&export)
+            .filter(|(name, ..)| implemented.contains(&method_hash(name)));
+        let instance: Arc<str> = Arc::from(format!("starstream:utxo/{iface}"));
+        let invocations = methods.map(|(name, export)| {
+            let srv = Arc::clone(&srv);
+            let instance = Arc::clone(&instance);
+            async move {
+                let export = export?;
+                let Some((_, name)) = name.split_once("[method]utxo.") else {
+                    bail!("unexpected UTXO method name: {name}");
+                };
+                let invocations = srv
+                    .serve(&instance, name, Arc::default())
+                    .await
+                    .map_err(wasmtime::Error::from_anyhow)
+                    .with_context(|| format!("failed to serve `{instance}#{name}`"))?;
+                Ok(((name, export), invocations))
+            }
+        });
+        let invocations = try_join_all(invocations).await?;
+        let (exports, mut invocations) = invocations.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
+        let shutdown = signal::ctrl_c();
+        let mut shutdown = pin!(shutdown);
+        while let Some((name, export, req, mut tx, mut rx)) =
+            poll_fn(|cx| match shutdown.as_mut().poll(cx) {
+                Poll::Ready(Ok(())) => Poll::Ready(None),
+                Poll::Ready(Err(err)) => {
+                    error!(?err, "failed to handle ^C");
+                    Poll::Ready(None)
+                }
+                Poll::Pending => {
+                    for ((name, export), invocations) in zip(&exports, &mut invocations) {
+                        match invocations.poll_next_unpin(cx) {
+                            Poll::Ready(Some(Ok((req, tx, rx)))) => {
+                                return Poll::Ready(Some((name, export, req, tx, rx)));
+                            }
+                            Poll::Ready(Some(Err(err))) => {
+                                error!(?err, name, "failed to accept method invocation");
+                                return Poll::Ready(None);
+                            }
+                            Poll::Ready(None) => {
+                                error!(
+                                    name,
+                                    "unexpected end of method invocation stream encountered"
+                                );
+                                return Poll::Ready(None);
+                            }
+                            Poll::Pending => continue,
+                        }
+                    }
+                    Poll::Pending
+                }
+            })
+            .await
+        {
+            debug!(?name, ?req, "invocation accepted");
+
+            let params_ty = export.ty().params();
+
+            debug_assert!(params_ty.len() >= 1);
+
+            let mut params = vec![Val::Bool(false); params_ty.len()];
+            params[0] = Val::Resource(utxo.resource());
+            for (v, (name, ty)) in zip(&mut params[1..], params_ty.skip(1)) {
+                debug!(name, "decoding parameter");
+                read_value(&mut rx, v, &ty)
+                    .await
+                    .with_context(|| format!("failed to decode parameter `{name}`"))?;
+            }
+            let results = utxo.call(export, params)?;
+
+            let mut buf = BytesMut::new();
+            for (v, ty) in zip(&results, export.ty().results()) {
+                ValEncoder::new(&ty)
+                    .encode(v, &mut buf)
+                    .context("failed to encode result")?;
+            }
+            tx.write_all(&buf)
+                .await
+                .context("failed to transmit results")?;
+            tx.shutdown().await.context("failed to shut down stream")?;
+        }
+        accept.abort();
+    }
     utxo.drop()?;
     Ok(())
 }
