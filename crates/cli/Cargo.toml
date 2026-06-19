@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+bytes = { workspace = true }
 clap = { workspace = true, features = [
     "color",
     "derive",
@@ -15,8 +16,24 @@ clap = { workspace = true, features = [
     "suggestions",
     "usage",
 ] }
+futures = { workspace = true }
 sha2 = { workspace = true }
 starstream-run = { workspace = true }
+tokio = { workspace = true, features = [
+    "io-util",
+    "macros",
+    "net",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+] }
+tokio-util = { workspace = true, features = ["codec", "io"] }
+tokio-websockets = { workspace = true, features = [
+    "client",
+    "fastrand",
+    "server",
+    "sha1_smol",
+] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = [
     "ansi",
@@ -25,8 +42,15 @@ tracing-subscriber = { workspace = true, features = [
     "smallvec",
     "tracing-log",
 ] }
+wasm-tokio = { workspace = true }
 wasmtime = { workspace = true, features = ["wave"] }
+wrpc-transport = { workspace = true }
+wrpc-websockets = { workspace = true }
 
 [dev-dependencies]
+anyhow = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 test-components = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
+wit-bindgen-wrpc = { workspace = true }
+wrpc-websockets = { workspace = true, features = ["fastrand", "sha1_smol"] }

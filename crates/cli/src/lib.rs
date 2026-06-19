@@ -18,6 +18,8 @@ use sha2::{Digest, Sha256};
 use starstream_run::bindings;
 use tracing::{debug, info};
 
+pub mod codec;
+
 /// The 256-bit method identity a contract declares via `implements-method`,
 /// carried as the four `u64` words wasmtime hands us from the guest.
 pub type MethodHash = (u64, u64, u64, u64);

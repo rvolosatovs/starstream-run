@@ -100,6 +100,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "beef"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -128,6 +134,12 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 dependencies = [
  "allocator-api2",
 ]
+
+[[package]]
+name = "bytes"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
 name = "cc"
@@ -494,6 +506,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cecba35d7ad927e23624b22ad55235f2239cfa44fd10428eecbeba6d6a717718"
 
 [[package]]
+name = "futures-macro"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e835b70203e41293343137df5c0664546da5745f82ec9b84d40be8336958447b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "futures-sink"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -514,6 +537,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-io",
+ "futures-macro",
  "futures-sink",
  "futures-task",
  "memchr",
@@ -565,6 +589,22 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "http"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6970f50e31d6fc17d3fa27329444bfa74e196cf62e95052a3f6fee181dba6425"
+dependencies = [
+ "bytes",
+ "itoa",
+]
+
+[[package]]
+name = "httparse"
+version = "1.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
 name = "id-arena"
@@ -622,6 +662,17 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
+name = "leb128-tokio"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a1f734b00871cae8f137d83d53cf4b5ee3f0d87224a87a4347dab4cde11a7a3"
+dependencies = [
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "leb128fmt"
@@ -717,6 +768,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mio"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
+dependencies = [
+ "libc",
+ "wasi 0.11.1+wasi-snapshot-preview1",
+ "windows-sys",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -765,6 +827,16 @@ dependencies = [
  "embedded-io 0.4.0",
  "embedded-io 0.6.1",
  "serde",
+]
+
+[[package]]
+name = "prettyplease"
+version = "0.2.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+dependencies = [
+ "proc-macro2",
+ "syn",
 ]
 
 [[package]]
@@ -923,6 +995,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -949,6 +1027,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+dependencies = [
+ "errno",
+ "libc",
+]
+
+[[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -961,6 +1055,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "socket2"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
+dependencies = [
+ "libc",
+ "windows-sys",
 ]
 
 [[package]]
@@ -977,7 +1081,7 @@ dependencies = [
  "test-components",
  "tracing",
  "wasi-preview1-component-adapter-provider",
- "wasmparser",
+ "wasmparser 0.251.0",
  "wasmtime",
  "wit-component",
 ]
@@ -987,14 +1091,23 @@ name = "starstream-run-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
+ "futures",
  "sha2",
  "starstream-run",
  "tempfile",
  "test-components",
+ "tokio",
+ "tokio-util",
+ "tokio-websockets",
  "tracing",
  "tracing-subscriber",
+ "wasm-tokio",
  "wasmtime",
+ "wit-bindgen-wrpc",
+ "wrpc-transport",
+ "wrpc-websockets",
 ]
 
 [[package]]
@@ -1093,6 +1206,76 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio"
+version = "1.52.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
+dependencies = [
+ "bytes",
+ "libc",
+ "mio",
+ "pin-project-lite",
+ "signal-hook-registry",
+ "socket2",
+ "tokio-macros",
+ "windows-sys",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-util"
+version = "0.7.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-websockets"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dad543404f98bfc969aeb71994105c592acfc6c43323fddcd016bb208d1c65cb"
+dependencies = [
+ "base64",
+ "bytes",
+ "fastrand",
+ "futures-core",
+ "futures-sink",
+ "http",
+ "httparse",
+ "sha1_smol",
+ "simdutf8",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "tracing"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1172,6 +1355,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "utf8-tokio"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "692aa1d5479fe22dac6ce581e8c6e83a9f8d90238250c1036b0139019a783a87"
+dependencies = [
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1190,10 +1383,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "wasi"
+version = "0.11.1+wasi-snapshot-preview1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
+
+[[package]]
+name = "wasi"
+version = "0.14.7+wasi-0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883478de20367e224c0090af9cf5f9fa85bed63a95c1abf3afc5c083ebc06e8c"
+dependencies = [
+ "wasip2",
+]
+
+[[package]]
 name = "wasi-preview1-component-adapter-provider"
 version = "45.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02ed52111afc004605074d1a3fad77ba3ac85c0c0b8ad028919275a46fec8cfd"
+
+[[package]]
+name = "wasip2"
+version = "1.0.4+wasi-0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b67efb37e106e55ce722a510d6b5f9c17f083e5fc79afc2badeb12cc313d9487"
+dependencies = [
+ "wit-bindgen",
+]
 
 [[package]]
 name = "wasm-bindgen"
@@ -1257,7 +1474,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a879a421bd17c528b74721b2abf4c62e8f1d1889c2ba8c3c50d02deaf2ce395"
 dependencies = [
  "leb128fmt",
- "wasmparser",
+ "wasmparser 0.251.0",
 ]
 
 [[package]]
@@ -1269,7 +1486,20 @@ dependencies = [
  "anyhow",
  "indexmap",
  "wasm-encoder",
- "wasmparser",
+ "wasmparser 0.251.0",
+]
+
+[[package]]
+name = "wasm-tokio"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1db8d9df11ba3f83f9a9fb2c159579e6ef7b368fa6650b8f7f01febb75784cef"
+dependencies = [
+ "leb128-tokio",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "utf8-tokio",
 ]
 
 [[package]]
@@ -1281,7 +1511,18 @@ dependencies = [
  "anyhow",
  "logos",
  "thiserror",
- "wit-parser",
+ "wit-parser 0.251.0",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.227.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f51cad774fb3c9461ab9bccc9c62dfb7388397b5deda31bf40e8108ccd678b2"
+dependencies = [
+ "bitflags",
+ "indexmap",
+ "semver",
 ]
 
 [[package]]
@@ -1305,7 +1546,7 @@ checksum = "8798c1a699bd25648b6708eefe94d97c6f9891febb94b42cca1f7a4b086ea64e"
 dependencies = [
  "anyhow",
  "termcolor",
- "wasmparser",
+ "wasmparser 0.251.0",
 ]
 
 [[package]]
@@ -1336,7 +1577,7 @@ dependencies = [
  "smallvec",
  "target-lexicon",
  "wasm-wave",
- "wasmparser",
+ "wasmparser 0.251.0",
  "wasmtime-environ",
  "wasmtime-internal-component-macro",
  "wasmtime-internal-component-util",
@@ -1374,7 +1615,7 @@ dependencies = [
  "smallvec",
  "target-lexicon",
  "wasm-encoder",
- "wasmparser",
+ "wasmparser 0.251.0",
  "wasmprinter",
  "wasmtime-internal-component-util",
  "wasmtime-internal-core",
@@ -1391,7 +1632,7 @@ dependencies = [
  "syn",
  "wasmtime-internal-component-util",
  "wasmtime-internal-wit-bindgen",
- "wit-parser",
+ "wit-parser 0.251.0",
 ]
 
 [[package]]
@@ -1429,7 +1670,7 @@ dependencies = [
  "smallvec",
  "target-lexicon",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.251.0",
  "wasmtime-environ",
  "wasmtime-internal-core",
  "wasmtime-internal-unwinder",
@@ -1501,7 +1742,7 @@ dependencies = [
  "bitflags",
  "heck",
  "indexmap",
- "wit-parser",
+ "wit-parser 0.251.0",
 ]
 
 [[package]]
@@ -1539,6 +1780,67 @@ dependencies = [
 ]
 
 [[package]]
+name = "wit-bindgen"
+version = "0.57.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "wit-bindgen-core"
+version = "0.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "398c650cec1278cfb72e214ba26ef3440ab726e66401bd39c04f465ee3979e6b"
+dependencies = [
+ "anyhow",
+ "heck",
+ "wit-parser 0.227.1",
+]
+
+[[package]]
+name = "wit-bindgen-wrpc"
+version = "0.11.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+dependencies = [
+ "anyhow",
+ "bitflags",
+ "bytes",
+ "futures",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "wasm-tokio",
+ "wit-bindgen-wrpc-rust-macro",
+ "wrpc-transport",
+]
+
+[[package]]
+name = "wit-bindgen-wrpc-rust"
+version = "0.11.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+dependencies = [
+ "anyhow",
+ "heck",
+ "prettyplease",
+ "syn",
+ "wit-bindgen-core",
+ "wrpc-introspect",
+]
+
+[[package]]
+name = "wit-bindgen-wrpc-rust-macro"
+version = "0.11.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+dependencies = [
+ "anyhow",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "wit-bindgen-core",
+ "wit-bindgen-wrpc-rust",
+]
+
+[[package]]
 name = "wit-component"
 version = "0.251.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1553,8 +1855,26 @@ dependencies = [
  "serde_json",
  "wasm-encoder",
  "wasm-metadata",
- "wasmparser",
- "wit-parser",
+ "wasmparser 0.251.0",
+ "wit-parser 0.251.0",
+]
+
+[[package]]
+name = "wit-parser"
+version = "0.227.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddf445ed5157046e4baf56f9138c124a0824d4d1657e7204d71886ad8ce2fc11"
+dependencies = [
+ "anyhow",
+ "id-arena",
+ "indexmap",
+ "log",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "unicode-xid",
+ "wasmparser 0.227.1",
 ]
 
 [[package]]
@@ -1573,7 +1893,47 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "unicode-xid",
- "wasmparser",
+ "wasmparser 0.251.0",
+]
+
+[[package]]
+name = "wrpc-introspect"
+version = "0.7.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+dependencies = [
+ "wit-parser 0.227.1",
+]
+
+[[package]]
+name = "wrpc-transport"
+version = "0.29.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "pin-project-lite",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "wasi 0.14.7+wasi-0.2.4",
+ "wasm-tokio",
+]
+
+[[package]]
+name = "wrpc-websockets"
+version = "0.1.0"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "tokio",
+ "tokio-util",
+ "tokio-websockets",
+ "tracing",
+ "wrpc-transport",
 ]
 
 [[package]]
