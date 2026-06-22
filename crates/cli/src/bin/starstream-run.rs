@@ -165,7 +165,9 @@ fn peek(head: &[u8]) -> Peeked<'_> {
 const TEXT_PLAIN: &str = "text/plain; charset=utf-8";
 
 /// Write a minimal HTTP/1.1 response with the given content type and close the
-/// connection.
+/// connection. The `access-control-allow-origin: *` header lets a browser
+/// front-end (served from another origin) fetch the WIT before invoking the
+/// served methods over wRPC/WebSockets.
 async fn respond(
     stream: &mut TcpStream,
     status: &str,
@@ -176,6 +178,7 @@ async fn respond(
         "HTTP/1.1 {status}\r\n\
          content-type: {content_type}\r\n\
          content-length: {}\r\n\
+         access-control-allow-origin: *\r\n\
          connection: close\r\n\
          \r\n",
         body.len(),
