@@ -49,5 +49,8 @@ wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", rev = "a26016
 web-sys = { version = "0.3.98", default-features = false }
 wit-bindgen-wrpc = { git = "https://github.com/bytecodealliance/wrpc", rev = "8f30fcda36e7a32960b6ee481d09b3427558494b", default-features = false }
 wit-component = { version = "0.251.0", default-features = false }
+wit-parser = { version = "0.251.0", default-features = false, features = [
+    "std",
+] }
 wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc", rev = "8f30fcda36e7a32960b6ee481d09b3427558494b", default-features = false }
 wrpc-websockets = { git = "https://github.com/bytecodealliance/wrpc", rev = "8f30fcda36e7a32960b6ee481d09b3427558494b", default-features = false }

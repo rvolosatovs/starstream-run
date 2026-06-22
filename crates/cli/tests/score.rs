@@ -100,7 +100,7 @@ async fn new_serve() -> anyhow::Result<()> {
     }
     sleep(Duration::from_millis(250)).await;
 
-    // A plain HTTP `GET /` on the same port serves the WIT.
+    // A plain HTTP `GET /` on the same port serves the WIT as text.
     let resp = reqwest::get(format!("http://{addr}/"))
         .await
         .context("failed to GET the WIT over HTTP")?;
@@ -110,6 +110,32 @@ async fn new_serve() -> anyhow::Result<()> {
         .await
         .context("failed to read the HTTP response body")?;
     assert_eq!(body, SCORE_WIT);
+
+    // ... and as a Wasm-encoded WIT package when `application/wasm` is preferred.
+    let resp = reqwest::Client::new()
+        .get(format!("http://{addr}/"))
+        .header(reqwest::header::ACCEPT, "application/wasm")
+        .send()
+        .await
+        .context("failed to GET the WIT as Wasm over HTTP")?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        resp.headers()[reqwest::header::CONTENT_TYPE],
+        "application/wasm",
+    );
+    let wasm = resp
+        .bytes()
+        .await
+        .context("failed to read the Wasm response body")?;
+    let decoded = wit_component::decode(&wasm).context("failed to decode the served Wasm WIT")?;
+    let resolve = decoded.resolve();
+    assert!(
+        resolve
+            .interfaces
+            .iter()
+            .any(|(_, iface)| iface.name.as_deref() == Some("score-progress")),
+        "the decoded WIT package is missing the `score-progress` interface",
+    );
 
     let ws = wrpc_websockets::ClientBuilder::new().uri(&format!("ws://{addr}"))?;
     let wrpc = wrpc_websockets::Client::from(ws);
