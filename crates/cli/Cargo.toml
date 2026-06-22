@@ -17,6 +17,7 @@ clap = { workspace = true, features = [
     "usage",
 ] }
 futures = { workspace = true }
+httparse = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
 starstream-run = { workspace = true }
 tokio = { workspace = true, features = [

@@ -1,3 +1,4 @@
+use core::fmt::Write as _;
 use core::future::poll_fn;
 use core::iter::zip;
 use core::pin::pin;
@@ -17,7 +18,7 @@ use starstream_run::Contract;
 use starstream_run_cli::codec::{ValEncoder, read_value};
 use starstream_run_cli::{CardanoCtx, Ctx, method_hash};
 use tokio::io::AsyncWriteExt as _;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tokio_util::codec::Encoder as _;
 use tracing::{debug, error};
@@ -113,6 +114,52 @@ fn wit_func(export: &str, ty: &wasmtime::component::types::ComponentFunc) -> Str
         ),
     };
     format!("{name}: func({params}){ret};")
+}
+
+/// What an accepted connection turned out to be, sniffed from its peeked request
+/// head. A partial head still parses the request line and headers seen so far,
+/// which is enough since both a handshake and a `GET` line fit one segment.
+enum Peeked {
+    /// A WebSocket upgrade, i.e. an `Upgrade: websocket` header — served as wRPC.
+    WebSocket,
+    /// A plain HTTP request, with its method and path (query stripped).
+    Http { method: String, path: String },
+}
+
+/// Sniff an accepted connection's peeked request head.
+fn peek(head: &[u8]) -> Peeked {
+    let mut headers = [httparse::EMPTY_HEADER; 64];
+    let mut req = httparse::Request::new(&mut headers);
+    let _ = req.parse(head);
+    let upgrade = req.headers.iter().any(|h| {
+        h.name.eq_ignore_ascii_case("upgrade")
+            && h.value
+                .split(|&b| b == b',' || b == b' ')
+                .any(|v| v.eq_ignore_ascii_case(b"websocket"))
+    });
+    if upgrade {
+        Peeked::WebSocket
+    } else {
+        let path = req.path.unwrap_or_default();
+        Peeked::Http {
+            method: req.method.unwrap_or_default().to_string(),
+            path: path.split(['?', '#']).next().unwrap_or(path).to_string(),
+        }
+    }
+}
+
+/// Write a minimal `text/plain` HTTP/1.1 response and close the connection.
+async fn respond(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {
+    let resp = format!(
+        "HTTP/1.1 {status}\r\n\
+         content-type: text/plain; charset=utf-8\r\n\
+         content-length: {}\r\n\
+         connection: close\r\n\
+         \r\n{body}",
+        body.len(),
+    );
+    stream.write_all(resp.as_bytes()).await?;
+    stream.shutdown().await
 }
 
 #[tokio::main]
@@ -233,17 +280,20 @@ async fn main() -> anyhow::Result<()> {
     let (_, iface) = export_name.split_once('/').unwrap_or(("", &export_name));
     let (iface, ..) = iface.split_once('@').unwrap_or((iface, ""));
 
-    println!("package starstream:utxo;\n");
-    println!("interface {iface} {{");
+    let mut wit = String::new();
+    writeln!(wit, "package starstream:utxo;\n").unwrap();
+    writeln!(wit, "interface {iface} {{").unwrap();
     for (name, method) in contract.utxo_methods(&export) {
         let method = method?;
         if implemented.contains(&method_hash(name)) {
-            println!("    {}", wit_func(name, method.ty()));
+            writeln!(wit, "    {}", wit_func(name, method.ty())).unwrap();
         }
     }
-    println!("}}");
+    writeln!(wit, "}}").unwrap();
+    print!("{wit}");
 
     if let Some(addr) = serve {
+        let wit: Arc<str> = Arc::from(wit);
         let lis = TcpListener::bind(addr)
             .await
             .with_context(|| format!("failed to bind `{addr}`"))?;
@@ -255,8 +305,39 @@ async fn main() -> anyhow::Result<()> {
             async move {
                 loop {
                     match lis.accept().await {
-                        Ok((stream, addr)) => {
+                        Ok((mut stream, addr)) => {
                             debug!(?addr, "TCP connection accepted");
+                            // Peek at the request head (without consuming it) to
+                            // tell a WebSocket upgrade (wRPC) apart from a plain
+                            // HTTP request, for which we serve the WIT at `GET /`.
+                            let mut head = [0u8; 8192];
+                            let n = match stream.peek(&mut head).await {
+                                Ok(n) => n,
+                                Err(err) => {
+                                    error!(?err, "failed to peek connection");
+                                    continue;
+                                }
+                            };
+                            if let Peeked::Http { method, path } = peek(&head[..n]) {
+                                let res = match (method.as_str(), path.as_str()) {
+                                    ("GET", "/") => respond(&mut stream, "200 OK", &wit).await,
+                                    ("GET", _) => {
+                                        respond(&mut stream, "404 Not Found", "not found\n").await
+                                    }
+                                    _ => {
+                                        respond(
+                                            &mut stream,
+                                            "405 Method Not Allowed",
+                                            "method not allowed\n",
+                                        )
+                                        .await
+                                    }
+                                };
+                                if let Err(err) = res {
+                                    error!(?err, "failed to serve HTTP response");
+                                }
+                                continue;
+                            }
                             let (req, (tx, rx)) = match ws.accept(stream).await {
                                 Ok((req, ws)) => (req, wrpc_websockets::split(ws)),
                                 Err(err) => {

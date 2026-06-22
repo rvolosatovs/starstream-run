@@ -21,6 +21,7 @@ futures = { version = "0.3", default-features = false, features = [
     "std",
     "async-await",
 ] }
+httparse = { version = "1.10", default-features = false }
 js-sys = { version = "0.3.98", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = [
     "derive",
