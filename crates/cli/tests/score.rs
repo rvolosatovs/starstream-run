@@ -10,6 +10,18 @@ use tokio::process::Command;
 use tokio::time::sleep;
 use tokio::{io::AsyncReadExt as _, net::TcpStream};
 
+/// The `starstream:utxo` WIT the CLI renders for the score guest, both to
+/// stdout and over `GET /`.
+const SCORE_WIT: &str = r#"package starstream:utxo;
+
+interface score-progress {
+    plus-chips: func(chips2: u64);
+    plus-mult: func(mult2: u64);
+    mult-mult: func(mult-pct: u64);
+    finish: func();
+}
+"#;
+
 mod bindings {
     wit_bindgen_wrpc::generate!({
         inline: "
@@ -54,18 +66,7 @@ async fn new() -> anyhow::Result<()> {
         .read_to_string(&mut out)
         .await
         .context("failed to read the CLI output")?;
-    assert_eq!(
-        out,
-        r#"package starstream:utxo;
-
-interface score-progress {
-    plus-chips: func(chips2: u64);
-    plus-mult: func(mult2: u64);
-    mult-mult: func(mult-pct: u64);
-    finish: func();
-}
-"#
-    );
+    assert_eq!(out, SCORE_WIT);
     Ok(())
 }
 
@@ -99,6 +100,17 @@ async fn new_serve() -> anyhow::Result<()> {
     }
     sleep(Duration::from_millis(250)).await;
 
+    // A plain HTTP `GET /` on the same port serves the WIT.
+    let resp = reqwest::get(format!("http://{addr}/"))
+        .await
+        .context("failed to GET the WIT over HTTP")?;
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body = resp
+        .text()
+        .await
+        .context("failed to read the HTTP response body")?;
+    assert_eq!(body, SCORE_WIT);
+
     let ws = wrpc_websockets::ClientBuilder::new().uri(&format!("ws://{addr}"))?;
     let wrpc = wrpc_websockets::Client::from(ws);
 
@@ -114,17 +126,6 @@ async fn new_serve() -> anyhow::Result<()> {
         .read_to_string(&mut out)
         .await
         .context("failed to read the CLI output")?;
-    assert_eq!(
-        out,
-        r#"package starstream:utxo;
-
-interface score-progress {
-    plus-chips: func(chips2: u64);
-    plus-mult: func(mult2: u64);
-    mult-mult: func(mult-pct: u64);
-    finish: func();
-}
-"#
-    );
+    assert_eq!(out, SCORE_WIT);
     Ok(())
 }
