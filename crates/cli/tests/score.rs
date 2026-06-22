@@ -6,12 +6,11 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use tempfile::NamedTempFile;
 use test_components::EXAMPLE_SCORE;
+use tokio::io::AsyncReadExt as _;
+use tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::time::sleep;
-use tokio::{io::AsyncReadExt as _, net::TcpStream};
 
-/// The `starstream:utxo` WIT the CLI renders for the score guest, both to
-/// stdout and over `GET /`.
 const SCORE_WIT: &str = r#"package starstream:utxo;
 
 interface score-progress {
@@ -100,7 +99,6 @@ async fn new_serve() -> anyhow::Result<()> {
     }
     sleep(Duration::from_millis(250)).await;
 
-    // A plain HTTP `GET /` on the same port serves the WIT as text.
     let resp = reqwest::get(format!("http://{addr}/"))
         .await
         .context("failed to GET the WIT over HTTP")?;
@@ -111,7 +109,6 @@ async fn new_serve() -> anyhow::Result<()> {
         .context("failed to read the HTTP response body")?;
     assert_eq!(body, SCORE_WIT);
 
-    // ... and as a Wasm-encoded WIT package when `application/wasm` is preferred.
     let resp = reqwest::Client::new()
         .get(format!("http://{addr}/"))
         .header(reqwest::header::ACCEPT, "application/wasm")
