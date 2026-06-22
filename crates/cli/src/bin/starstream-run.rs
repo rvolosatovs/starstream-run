@@ -315,20 +315,17 @@ async fn main() -> anyhow::Result<()> {
     writeln!(wit, "}}").unwrap();
     print!("{wit}");
 
+    let mut resolve = wit_parser::Resolve::new();
+    let pkg = resolve
+        .push_str("utxo.wit", &wit)
+        .map_err(wasmtime::Error::from_anyhow)
+        .context("failed to parse the rendered WIT")?;
+
+    let wit_wasm = wit_component::encode(&resolve, pkg)
+        .map_err(wasmtime::Error::from_anyhow)
+        .context("failed to encode the WIT as Wasm")?;
+
     if let Some(addr) = serve {
-        // The Wasm-encoded form of the WIT package, served when a `GET /`
-        // request prefers `application/wasm`. Built by parsing the rendered
-        // text back into a package.
-        let mut resolve = wit_parser::Resolve::new();
-        let pkg = resolve
-            .push_str("rpc.wit", &wit)
-            .map_err(wasmtime::Error::from_anyhow)
-            .context("failed to parse the rendered WIT")?;
-        let wit_wasm: Arc<[u8]> = wit_component::encode(&resolve, pkg)
-            .map_err(wasmtime::Error::from_anyhow)
-            .context("failed to encode the WIT as Wasm")?
-            .into();
-        let wit: Arc<str> = Arc::from(wit);
         let lis = TcpListener::bind(addr)
             .await
             .with_context(|| format!("failed to bind `{addr}`"))?;
@@ -361,16 +358,26 @@ async fn main() -> anyhow::Result<()> {
                             {
                                 let res = match (method, path) {
                                     ("GET", "/") if accept.contains("application/wasm") => {
-                                        respond(&mut stream, "200 OK", "application/wasm", &wit_wasm)
-                                            .await
+                                        respond(
+                                            &mut stream,
+                                            "200 OK",
+                                            "application/wasm",
+                                            &wit_wasm,
+                                        )
+                                        .await
                                     }
                                     ("GET", "/") => {
                                         respond(&mut stream, "200 OK", TEXT_PLAIN, wit.as_bytes())
                                             .await
                                     }
                                     ("GET", _) => {
-                                        respond(&mut stream, "404 Not Found", TEXT_PLAIN, b"not found\n")
-                                            .await
+                                        respond(
+                                            &mut stream,
+                                            "404 Not Found",
+                                            TEXT_PLAIN,
+                                            b"not found\n",
+                                        )
+                                        .await
                                     }
                                     _ => {
                                         respond(
