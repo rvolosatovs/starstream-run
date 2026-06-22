@@ -1094,6 +1094,7 @@ dependencies = [
  "bytes",
  "clap",
  "futures",
+ "httparse",
  "sha2",
  "starstream-run",
  "tempfile",
