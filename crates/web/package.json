@@ -10,6 +10,7 @@
     "build:score": "cargo build --release --target wasm32-unknown-unknown --manifest-path ../../examples/components/score/Cargo.toml && cp ../../examples/components/score/target/wasm32-unknown-unknown/release/score.wasm web/score.wasm",
     "build": "npm run build:wasm && npm run build:bindgen && npm run build:score",
     "serve": "node serve.mjs",
-    "start": "npm run build && npm run serve"
+    "start": "npm run build && npm run serve",
+    "test:remote": "node test-remote.mjs"
   }
 }
