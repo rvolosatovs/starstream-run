@@ -1380,6 +1380,8 @@ dependencies = [
  "wasm-tokio",
  "wasmtime",
  "wit-bindgen-wrpc",
+ "wit-component",
+ "wit-parser 0.251.0",
  "wrpc-transport",
  "wrpc-websockets",
 ]

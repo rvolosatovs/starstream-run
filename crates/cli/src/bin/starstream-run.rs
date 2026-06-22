@@ -122,8 +122,13 @@ fn wit_func(export: &str, ty: &wasmtime::component::types::ComponentFunc) -> Str
 enum Peeked<'a> {
     /// A WebSocket upgrade, i.e. an `Upgrade: websocket` header — served as wRPC.
     WebSocket,
-    /// A plain HTTP request, with its method and path (query stripped).
-    Http { method: &'a str, path: &'a str },
+    /// A plain HTTP request, with its method, path (query stripped) and the raw
+    /// `Accept` header (empty if absent), used to pick the WIT representation.
+    Http {
+        method: &'a str,
+        path: &'a str,
+        accept: &'a str,
+    },
 }
 
 /// Sniff an accepted connection's peeked request head.
@@ -131,11 +136,16 @@ fn peek(head: &[u8]) -> Peeked<'_> {
     let mut headers = [httparse::EMPTY_HEADER; 64];
     let mut req = httparse::Request::new(&mut headers);
     let _ = req.parse(head);
-    let upgrade = req.headers.iter().any(|h| {
-        h.name.eq_ignore_ascii_case("upgrade")
-            && h.value
-                .split(|&b| b == b',' || b == b' ')
-                .any(|v| v.eq_ignore_ascii_case(b"websocket"))
+    let header = |name: &str| {
+        req.headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case(name))
+            .map(|h| h.value)
+    };
+    let upgrade = header("upgrade").is_some_and(|value| {
+        value
+            .split(|&b| b == b',' || b == b' ')
+            .any(|v| v.eq_ignore_ascii_case(b"websocket"))
     });
     if upgrade {
         Peeked::WebSocket
@@ -144,21 +154,34 @@ fn peek(head: &[u8]) -> Peeked<'_> {
         Peeked::Http {
             method: req.method.unwrap_or_default(),
             path: path.split(['?', '#']).next().unwrap_or(path),
+            accept: header("accept")
+                .and_then(|v| std::str::from_utf8(v).ok())
+                .unwrap_or_default(),
         }
     }
 }
 
-/// Write a minimal `text/plain` HTTP/1.1 response and close the connection.
-async fn respond(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {
-    let resp = format!(
+/// Content type of the textual WIT and the plain-text error bodies.
+const TEXT_PLAIN: &str = "text/plain; charset=utf-8";
+
+/// Write a minimal HTTP/1.1 response with the given content type and close the
+/// connection.
+async fn respond(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let head = format!(
         "HTTP/1.1 {status}\r\n\
-         content-type: text/plain; charset=utf-8\r\n\
+         content-type: {content_type}\r\n\
          content-length: {}\r\n\
          connection: close\r\n\
-         \r\n{body}",
+         \r\n",
         body.len(),
     );
-    stream.write_all(resp.as_bytes()).await?;
+    stream.write_all(head.as_bytes()).await?;
+    stream.write_all(body).await?;
     stream.shutdown().await
 }
 
@@ -293,6 +316,18 @@ async fn main() -> anyhow::Result<()> {
     print!("{wit}");
 
     if let Some(addr) = serve {
+        // The Wasm-encoded form of the WIT package, served when a `GET /`
+        // request prefers `application/wasm`. Built by parsing the rendered
+        // text back into a package.
+        let mut resolve = wit_parser::Resolve::new();
+        let pkg = resolve
+            .push_str("rpc.wit", &wit)
+            .map_err(wasmtime::Error::from_anyhow)
+            .context("failed to parse the rendered WIT")?;
+        let wit_wasm: Arc<[u8]> = wit_component::encode(&resolve, pkg)
+            .map_err(wasmtime::Error::from_anyhow)
+            .context("failed to encode the WIT as Wasm")?
+            .into();
         let wit: Arc<str> = Arc::from(wit);
         let lis = TcpListener::bind(addr)
             .await
@@ -318,17 +353,31 @@ async fn main() -> anyhow::Result<()> {
                                     continue;
                                 }
                             };
-                            if let Peeked::Http { method, path } = peek(&head[..n]) {
+                            if let Peeked::Http {
+                                method,
+                                path,
+                                accept,
+                            } = peek(&head[..n])
+                            {
                                 let res = match (method, path) {
-                                    ("GET", "/") => respond(&mut stream, "200 OK", &wit).await,
+                                    ("GET", "/") if accept.contains("application/wasm") => {
+                                        respond(&mut stream, "200 OK", "application/wasm", &wit_wasm)
+                                            .await
+                                    }
+                                    ("GET", "/") => {
+                                        respond(&mut stream, "200 OK", TEXT_PLAIN, wit.as_bytes())
+                                            .await
+                                    }
                                     ("GET", _) => {
-                                        respond(&mut stream, "404 Not Found", "not found\n").await
+                                        respond(&mut stream, "404 Not Found", TEXT_PLAIN, b"not found\n")
+                                            .await
                                     }
                                     _ => {
                                         respond(
                                             &mut stream,
                                             "405 Method Not Allowed",
-                                            "method not allowed\n",
+                                            TEXT_PLAIN,
+                                            b"method not allowed\n",
                                         )
                                         .await
                                     }
