@@ -119,15 +119,15 @@ fn wit_func(export: &str, ty: &wasmtime::component::types::ComponentFunc) -> Str
 /// What an accepted connection turned out to be, sniffed from its peeked request
 /// head. A partial head still parses the request line and headers seen so far,
 /// which is enough since both a handshake and a `GET` line fit one segment.
-enum Peeked {
+enum Peeked<'a> {
     /// A WebSocket upgrade, i.e. an `Upgrade: websocket` header — served as wRPC.
     WebSocket,
     /// A plain HTTP request, with its method and path (query stripped).
-    Http { method: String, path: String },
+    Http { method: &'a str, path: &'a str },
 }
 
 /// Sniff an accepted connection's peeked request head.
-fn peek(head: &[u8]) -> Peeked {
+fn peek(head: &[u8]) -> Peeked<'_> {
     let mut headers = [httparse::EMPTY_HEADER; 64];
     let mut req = httparse::Request::new(&mut headers);
     let _ = req.parse(head);
@@ -142,8 +142,8 @@ fn peek(head: &[u8]) -> Peeked {
     } else {
         let path = req.path.unwrap_or_default();
         Peeked::Http {
-            method: req.method.unwrap_or_default().to_string(),
-            path: path.split(['?', '#']).next().unwrap_or(path).to_string(),
+            method: req.method.unwrap_or_default(),
+            path: path.split(['?', '#']).next().unwrap_or(path),
         }
     }
 }
@@ -319,7 +319,7 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             };
                             if let Peeked::Http { method, path } = peek(&head[..n]) {
-                                let res = match (method.as_str(), path.as_str()) {
+                                let res = match (method, path) {
                                     ("GET", "/") => respond(&mut stream, "200 OK", &wit).await,
                                     ("GET", _) => {
                                         respond(&mut stream, "404 Not Found", "not found\n").await
