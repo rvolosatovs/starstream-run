@@ -47,10 +47,10 @@ wasm-tokio = { version = "0.6", default-features = false }
 wasmparser = { version = "0.251.0", default-features = false }
 wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", rev = "a260163e20dd5bb92a3a9df093c9e229e2b4f8df", default-features = false }
 web-sys = { version = "0.3.98", default-features = false }
-wit-bindgen-wrpc = { git = "https://github.com/bytecodealliance/wrpc", rev = "8f30fcda36e7a32960b6ee481d09b3427558494b", default-features = false }
+wit-bindgen-wrpc = { git = "https://github.com/bytecodealliance/wrpc", rev = "032b10599a31b2290e18a4350cb19d83dd509e68", default-features = false }
 wit-component = { version = "0.251.0", default-features = false }
 wit-parser = { version = "0.251.0", default-features = false, features = [
     "std",
 ] }
-wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc", rev = "8f30fcda36e7a32960b6ee481d09b3427558494b", default-features = false }
-wrpc-websockets = { git = "https://github.com/bytecodealliance/wrpc", rev = "8f30fcda36e7a32960b6ee481d09b3427558494b", default-features = false }
+wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc", rev = "032b10599a31b2290e18a4350cb19d83dd509e68", default-features = false }
+wrpc-websockets = { git = "https://github.com/bytecodealliance/wrpc", rev = "032b10599a31b2290e18a4350cb19d83dd509e68", default-features = false }
