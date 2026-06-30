@@ -1,0 +1,24 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@bytecodealliance/wrpc':
+        specifier: github:bytecodealliance/wrpc#032b10599a31b2290e18a4350cb19d83dd509e68&path:/js
+        version: https://codeload.github.com/bytecodealliance/wrpc/tar.gz/032b10599a31b2290e18a4350cb19d83dd509e68#path:/js
+
+packages:
+
+  '@bytecodealliance/wrpc@https://codeload.github.com/bytecodealliance/wrpc/tar.gz/032b10599a31b2290e18a4350cb19d83dd509e68#path:/js':
+    resolution: {gitHosted: true, path: /js, tarball: https://codeload.github.com/bytecodealliance/wrpc/tar.gz/032b10599a31b2290e18a4350cb19d83dd509e68}
+    version: 0.1.0
+    engines: {node: '>=18'}
+
+snapshots:
+
+  '@bytecodealliance/wrpc@https://codeload.github.com/bytecodealliance/wrpc/tar.gz/032b10599a31b2290e18a4350cb19d83dd509e68#path:/js': {}

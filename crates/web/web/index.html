@@ -109,6 +109,29 @@
       .links a { text-decoration: none; }
       .links a:hover { text-decoration: underline; }
 
+      /* "Connect to a served contract" form: an address + Connect button. */
+      .connect {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        margin-top: 0.75rem;
+        flex-wrap: wrap;
+      }
+      .connect input {
+        font: inherit;
+        font-size: 0.9rem;
+        color: var(--fg);
+        background: var(--bg);
+        border: 1px solid #3f3f46;
+        border-radius: 6px;
+        padding: 0.45rem 0.6rem;
+        flex: 1 1 16rem;
+        min-width: 12rem;
+      }
+      .connect button { margin-top: 0; }
+      .connect-status { font-size: 0.85rem; color: var(--muted); }
+      .connect-status.err { color: var(--err); }
+
       /* One loaded contract = one Web Worker = one card. */
       #contracts:empty { display: none; }
       .contract-card {
@@ -385,6 +408,14 @@
         <button id="add-default" disabled>Add the bundled score.wasm example</button>
       </div>
 
+      <!-- Connect to a UTXO served by a `starstream-run` CLI (`--serve <ADDR>`):
+           fetch its WIT over HTTP, then invoke its methods over WebSockets. -->
+      <div class="connect">
+        <input type="text" id="connect-url" placeholder="127.0.0.1:8080" spellcheck="false" />
+        <button id="connect-btn">Connect to a served contract</button>
+        <span class="connect-status" id="connect-status"></span>
+      </div>
+
       <div class="status" id="status">Loading runtime…</div>
 
       <div id="contracts"></div>
@@ -404,9 +435,25 @@
         constructor — methods it has not declared are shown disabled.
         Per-contract trace logs appear at the bottom of each card.
       </footer>
+
+      <footer>
+        You can also <strong>connect to a UTXO served by a
+        <code>starstream-run</code> CLI</strong> (started with
+        <code>--serve &lt;ADDR&gt;</code>): enter its address above and click
+        Connect. The page fetches the served WIT over HTTP, lists the served
+        UTXO and its methods in the same <strong>Invoke</strong> panel, and
+        invokes them over WebSockets via wRPC — the CLI runs the guest and
+        owns the UTXO; nothing is instantiated in the browser. A served
+        contract has no constructors or storage to mint from: the CLI already
+        minted the single UTXO it serves. When the page is itself served over
+        <code>https</code>, the CLI must be reachable over <code>wss</code>;
+        the plain-text CLI is intended for local (<code>http</code>) use.
+      </footer>
     </main>
 
     <script type="module">
+      import { RemoteContract, streamTransport, callOverTransport } from "./wrpc.js";
+
       // The runtime (~11 MB) is compiled once on the main thread and the
       // resulting WebAssembly.Module is structured-cloned to every Worker, so
       // adding a contract spawns a Worker that instantiates without recompiling.
@@ -420,6 +467,9 @@
       const status = document.getElementById("status");
       const contractsEl = document.getElementById("contracts");
       const invokeEl = document.getElementById("invoke");
+      const connectUrl = document.getElementById("connect-url");
+      const connectBtn = document.getElementById("connect-btn");
+      const connectStatus = document.getElementById("connect-status");
 
       let nextContractId = 0; // distinguishes contracts in the invocation panel
       const loadedHashes = new Set(); // sha256 hex of every currently-loaded contract
@@ -474,8 +524,74 @@
         }
 
         instantiate(bytes) { return this.#rpc("instantiate", { bytes }); }
-        describe() { return this.#rpc("describe"); }
-        call(instance, func, args) { return this.#rpc("call", { instance, func, args }); }
+
+        // Cache each method's wRPC type signature (param + result type trees)
+        // off the describe so `call` can invoke methods over wRPC.
+        async describe() {
+          const json = await this.#rpc("describe");
+          const api = JSON.parse(json);
+          this.sigs = new Map();
+          for (const inst of api.instances ?? []) {
+            for (const m of inst.methods ?? []) {
+              this.sigs.set(`${inst.name} ${m.export}`, {
+                params: (m.params ?? []).map((p) => p.ty),
+                results: m.results ?? [],
+              });
+            }
+          }
+          return json;
+        }
+
+        // A `[method]` call is invoked over wRPC: a duplex stream pair is handed
+        // to the Worker (which serves it against the wasm guest) and the page
+        // drives the wRPC client over its end. The `self` `{ $handle }` is split
+        // out of the args and travels in the envelope (the receiver is injected
+        // Worker-side). Constructors and other ops still use the plain RPC path.
+        call(instance, func, args) {
+          const sig = func.startsWith("[method]") && this.sigs?.get(`${instance} ${func}`);
+          if (!sig) return this.#rpc("call", { instance, func, args });
+
+          let parsed = JSON.parse(args);
+          let handle;
+          if (parsed.length && parsed[0] && typeof parsed[0] === "object" && "$handle" in parsed[0]) {
+            handle = parsed[0].$handle;
+            parsed = parsed.slice(1);
+          }
+          const c2s = new TransformStream(); // page -> worker
+          const s2c = new TransformStream(); // worker -> page
+          const transport = streamTransport({ readable: s2c.readable, writable: c2s.writable });
+
+          const id = this.nextId++;
+          const done = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+          this.worker.postMessage(
+            {
+              id,
+              op: "invoke",
+              handle,
+              instance,
+              func,
+              paramTypes: sig.params,
+              resultTypes: sig.results,
+              readable: c2s.readable,
+              writable: s2c.writable,
+            },
+            [c2s.readable, s2c.writable],
+          );
+
+          // The results come back over the stream; the `{ id, ok, error }`
+          // response (awaited via `done`) is authoritative on success/failure
+          // and carries any drained events.
+          return (async () => {
+            let results = "[]";
+            try {
+              results = await callOverTransport(transport, instance, func, sig.params, sig.results, parsed);
+            } catch {
+              // A stream-level failure surfaces as the Worker's error response.
+            }
+            await done;
+            return results;
+          })();
+        }
         loadUtxo(instance, storage) { return this.#rpc("loadUtxo", { instance, storage }); }
         storageGet(handle) { return this.#rpc("storageGet", { handle }); }
         implementedMethods(handle) { return this.#rpc("implementedMethods", { handle }); }
@@ -1159,6 +1275,95 @@
         return entry;
       }
 
+      // ----- Served (remote) contracts ------------------------------------
+
+      // Build the card for a CLI-served contract: a header with its address,
+      // status and a disconnect button, plus the served WIT once fetched. The
+      // methods themselves live in the shared Invoke panel above, driven off
+      // the registry entry's single implicit live UTXO.
+      function makeRemoteCard(url) {
+        const statusEl = el("span", { className: "contract-status", textContent: "connecting…" });
+        const disconnectBtn = el("button", { type: "button", className: "terminate-btn", textContent: "disconnect" });
+        const witEl = el("pre");
+        const root = el("div", { className: "contract-card" }, [
+          el("div", { className: "contract-head" }, [
+            el("span", { className: "contract-filename", textContent: url }),
+            el("span", { className: "badge", textContent: "served" }),
+            statusEl,
+            disconnectBtn,
+          ]),
+          el("p", {
+            className: "lead",
+            textContent:
+              "Served by a starstream-run CLI over WebSockets — call its methods from the Invoke panel above.",
+          }),
+          el("h3", { className: "log-title", textContent: "WIT" }),
+          witEl,
+        ]);
+        const setStatus = (text, kind = "") => {
+          statusEl.textContent = text;
+          statusEl.className = "contract-status" + (kind ? " " + kind : "");
+        };
+        return { root, setStatus, witEl, disconnectBtn };
+      }
+
+      // Connect to a CLI-served contract at `url`: fetch + parse its WIT, then
+      // register it as a contract whose single implicit live UTXO is the one
+      // the CLI serves, so the Invoke panel lists and calls its methods just
+      // like a locally-instantiated one.
+      async function addRemoteContract(url) {
+        const remote = new RemoteContract(url);
+        const card = makeRemoteCard(url);
+        contractsEl.prepend(card.root);
+
+        const entry = {
+          id: nextContractId++,
+          cx: remote,
+          label: `${url} (served)`,
+          liveHandles: new Map(),
+          log: [],
+          hash: null,
+        };
+        registry.contracts.set(entry.id, entry);
+        registry.notify();
+
+        card.disconnectBtn.addEventListener("click", () => {
+          card.root.remove();
+          registry.contracts.delete(entry.id);
+          registry.notify();
+        });
+
+        try {
+          card.setStatus("fetching WIT…");
+          const wit = await remote.connect();
+          const api = JSON.parse(remote.describe());
+          const inst = api.instances[0];
+          if (!inst) throw new Error("the served WIT declares no interface");
+          entry.label = `${remote.parsed.interface} @ ${url}`;
+          // The CLI serves exactly one minted UTXO; expose it as the sole live
+          // handle (no constructor/storage — the CLI already minted it).
+          entry.liveHandles.set(0, { id: 0, instance: inst, label: "served UTXO", refresh: () => {} });
+          card.witEl.textContent = wit;
+          card.setStatus("connected", "ok");
+          registry.notify();
+        } catch (err) {
+          card.setStatus("failed: " + String(err.message ?? err), "err");
+        }
+      }
+
+      function connect() {
+        const url = connectUrl.value.trim();
+        if (!url) {
+          connectStatus.textContent = "Enter an address, e.g. 127.0.0.1:8080";
+          connectStatus.className = "connect-status err";
+          connectUrl.focus();
+          return;
+        }
+        connectStatus.textContent = "";
+        connectStatus.className = "connect-status";
+        addRemoteContract(url);
+      }
+
       async function addFiles(files) {
         // Sequential so two identical files dropped together can't both pass the
         // duplicate-hash check before either registers its hash.
@@ -1201,6 +1406,10 @@
       addDefaultBtn.addEventListener("click", () =>
         addDefault().catch((err) => setStatus(String(err), "err")),
       );
+      connectBtn.addEventListener("click", connect);
+      connectUrl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") connect();
+      });
 
       // The single invocation panel is always present, above the drop zone; it
       // shows placeholders until a contract is loaded and a UTXO is minted.

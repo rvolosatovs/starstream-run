@@ -159,9 +159,10 @@ impl Contract {
     ///
     /// Shape: `{ instances: [{ name, resource, constructors: [func], methods:
     /// [func], storage: [{name, kind}] | null }] }`, where `func` is
-    /// `{ export, label, params: [{name, kind}] }`. `kind` is a scalar type
-    /// name (`u64`, `bool`, `string`, …) or `"json"` for everything else
-    /// (entered as raw JSON on the page).
+    /// `{ export, label, params: [{name, kind, ty}], results: [ty] }`. `kind` is
+    /// a scalar type name (`u64`, `bool`, `string`, …) or `"json"` for
+    /// everything else (entered as raw JSON on the page); `ty` is the full
+    /// structural type tree (see [`type_to_json`]) the wRPC codec walks.
     pub fn describe(&self) -> Result<String, JsError> {
         // Collect owned `(name, UtxoExport)` pairs first so the `utxos()`
         // borrow of `self.inner` is released before we re-borrow it below.
@@ -429,15 +430,80 @@ pub fn instantiate(component: &[u8]) -> Result<Contract, JsError> {
 
 /// Render one function (constructor or method) as a describe entry, dropping
 /// the first `skip` parameters (used to hide a method's `self`).
+///
+/// Each parameter carries both a `kind` (the scalar tag the page's input
+/// widgets switch on) and a full structural `ty` type tree; the `results` are
+/// type trees too. The type trees mirror the JS `Type` shape the
+/// `@bytecodealliance/wrpc` codec walks, so the page can invoke the method over
+/// wRPC (encoding the arguments and decoding the results) without a separate
+/// WIT round-trip.
 fn func_json(export: &str, ty: &types::ComponentFunc, skip: usize) -> Value {
     let params: Vec<Value> = ty
         .params()
         .skip(skip)
-        .map(|(name, ty)| json!({ "name": name, "kind": kind_str(&ty) }))
+        .map(|(name, ty)| json!({ "name": name, "kind": kind_str(&ty), "ty": type_to_json(&ty) }))
         .collect();
+    let results: Vec<Value> = ty.results().map(|ty| type_to_json(&ty)).collect();
     // Export names look like `[static]utxo.new` / `[method]utxo.plus-chips`.
     let label = export.rsplit('.').next().unwrap_or(export);
-    json!({ "export": export, "label": label, "params": params })
+    json!({ "export": export, "label": label, "params": params, "results": results })
+}
+
+/// Lower a component [`Type`] into the JSON `Type` tree the JS wRPC codec
+/// (`@bytecodealliance/wrpc`) consumes: `{ kind, ... }`, with nested types under
+/// `elem` / `some` / `ok` / `err` / `elems` / `fields` / `cases` / `names`.
+fn type_to_json(ty: &Type) -> Value {
+    match ty {
+        Type::Bool => json!({ "kind": "bool" }),
+        Type::S8 => json!({ "kind": "s8" }),
+        Type::U8 => json!({ "kind": "u8" }),
+        Type::S16 => json!({ "kind": "s16" }),
+        Type::U16 => json!({ "kind": "u16" }),
+        Type::S32 => json!({ "kind": "s32" }),
+        Type::U32 => json!({ "kind": "u32" }),
+        Type::S64 => json!({ "kind": "s64" }),
+        Type::U64 => json!({ "kind": "u64" }),
+        Type::Float32 => json!({ "kind": "f32" }),
+        Type::Float64 => json!({ "kind": "f64" }),
+        Type::Char => json!({ "kind": "char" }),
+        Type::String => json!({ "kind": "string" }),
+        Type::List(list) => json!({ "kind": "list", "elem": type_to_json(&list.ty()) }),
+        Type::Record(record) => json!({
+            "kind": "record",
+            "fields": record
+                .fields()
+                .map(|f| json!({ "name": f.name, "ty": type_to_json(&f.ty) }))
+                .collect::<Vec<_>>(),
+        }),
+        Type::Tuple(tuple) => json!({
+            "kind": "tuple",
+            "elems": tuple.types().map(|t| type_to_json(&t)).collect::<Vec<_>>(),
+        }),
+        Type::Variant(variant) => json!({
+            "kind": "variant",
+            "cases": variant
+                .cases()
+                .map(|c| json!({ "name": c.name, "ty": c.ty.as_ref().map(type_to_json) }))
+                .collect::<Vec<_>>(),
+        }),
+        Type::Enum(en) => json!({ "kind": "enum", "names": en.names().collect::<Vec<_>>() }),
+        Type::Option(opt) => json!({ "kind": "option", "some": type_to_json(&opt.ty()) }),
+        Type::Result(res) => json!({
+            "kind": "result",
+            "ok": res.ok().map(|t| type_to_json(&t)),
+            "err": res.err().map(|t| type_to_json(&t)),
+        }),
+        Type::Flags(flags) => json!({ "kind": "flags", "names": flags.names().collect::<Vec<_>>() }),
+        // The only resource in play is the `utxo`; its handle never crosses the
+        // wRPC boundary for the supported method set (the `self` receiver is
+        // injected worker-side), so a placeholder name is enough.
+        Type::Own(_) => json!({ "kind": "own", "name": "utxo" }),
+        Type::Borrow(_) => json!({ "kind": "borrow", "name": "utxo" }),
+        // `map` / `future` / `stream` / `error-context` do not occur in
+        // Starstream UTXO method signatures; tag them so the JS codec rejects
+        // an invocation that somehow involves one rather than mis-encoding it.
+        _ => json!({ "kind": "unsupported" }),
+    }
 }
 
 /// The hash a contract declares for `export` via `implements-method`.

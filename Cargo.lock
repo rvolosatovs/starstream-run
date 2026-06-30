@@ -866,9 +866,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "leb128-tokio"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1f734b00871cae8f137d83d53cf4b5ee3f0d87224a87a4347dab4cde11a7a3"
+checksum = "68e94e2f8143ae63a07c670a27f2fc42a333293c249566f8d4cd6609689656bb"
 dependencies = [
  "tokio",
  "tokio-util",
@@ -1353,7 +1353,7 @@ dependencies = [
  "test-components",
  "tracing",
  "wasi-preview1-component-adapter-provider",
- "wasmparser 0.251.0",
+ "wasmparser",
  "wasmtime",
  "wit-component",
 ]
@@ -1381,7 +1381,7 @@ dependencies = [
  "wasmtime",
  "wit-bindgen-wrpc",
  "wit-component",
- "wit-parser 0.251.0",
+ "wit-parser",
  "wrpc-transport",
  "wrpc-websockets",
 ]
@@ -1858,7 +1858,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a879a421bd17c528b74721b2abf4c62e8f1d1889c2ba8c3c50d02deaf2ce395"
 dependencies = [
  "leb128fmt",
- "wasmparser 0.251.0",
+ "wasmparser",
 ]
 
 [[package]]
@@ -1870,14 +1870,14 @@ dependencies = [
  "anyhow",
  "indexmap",
  "wasm-encoder",
- "wasmparser 0.251.0",
+ "wasmparser",
 ]
 
 [[package]]
 name = "wasm-tokio"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1db8d9df11ba3f83f9a9fb2c159579e6ef7b368fa6650b8f7f01febb75784cef"
+checksum = "a89e5174a1312bd31d081a1dd6db8e48e2dc680b2988aba43befabb8459ea999"
 dependencies = [
  "leb128-tokio",
  "tokio",
@@ -1895,18 +1895,7 @@ dependencies = [
  "anyhow",
  "logos",
  "thiserror",
- "wit-parser 0.251.0",
-]
-
-[[package]]
-name = "wasmparser"
-version = "0.227.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f51cad774fb3c9461ab9bccc9c62dfb7388397b5deda31bf40e8108ccd678b2"
-dependencies = [
- "bitflags",
- "indexmap",
- "semver",
+ "wit-parser",
 ]
 
 [[package]]
@@ -1930,7 +1919,7 @@ checksum = "8798c1a699bd25648b6708eefe94d97c6f9891febb94b42cca1f7a4b086ea64e"
 dependencies = [
  "anyhow",
  "termcolor",
- "wasmparser 0.251.0",
+ "wasmparser",
 ]
 
 [[package]]
@@ -1961,7 +1950,7 @@ dependencies = [
  "smallvec",
  "target-lexicon",
  "wasm-wave",
- "wasmparser 0.251.0",
+ "wasmparser",
  "wasmtime-environ",
  "wasmtime-internal-component-macro",
  "wasmtime-internal-component-util",
@@ -1999,7 +1988,7 @@ dependencies = [
  "smallvec",
  "target-lexicon",
  "wasm-encoder",
- "wasmparser 0.251.0",
+ "wasmparser",
  "wasmprinter",
  "wasmtime-internal-component-util",
  "wasmtime-internal-core",
@@ -2016,7 +2005,7 @@ dependencies = [
  "syn",
  "wasmtime-internal-component-util",
  "wasmtime-internal-wit-bindgen",
- "wit-parser 0.251.0",
+ "wit-parser",
 ]
 
 [[package]]
@@ -2054,7 +2043,7 @@ dependencies = [
  "smallvec",
  "target-lexicon",
  "thiserror",
- "wasmparser 0.251.0",
+ "wasmparser",
  "wasmtime-environ",
  "wasmtime-internal-core",
  "wasmtime-internal-unwinder",
@@ -2126,7 +2115,7 @@ dependencies = [
  "bitflags",
  "heck",
  "indexmap",
- "wit-parser 0.251.0",
+ "wit-parser",
 ]
 
 [[package]]
@@ -2171,19 +2160,19 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wit-bindgen-core"
-version = "0.40.0"
+version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "398c650cec1278cfb72e214ba26ef3440ab726e66401bd39c04f465ee3979e6b"
+checksum = "4738d1c9a78e97bc7f664bfafd5d8e67d7bb26faa5c41e6d628e8bbdad3ec351"
 dependencies = [
  "anyhow",
  "heck",
- "wit-parser 0.227.1",
+ "wit-parser",
 ]
 
 [[package]]
 name = "wit-bindgen-wrpc"
 version = "0.11.0"
-source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=032b10599a31b2290e18a4350cb19d83dd509e68#032b10599a31b2290e18a4350cb19d83dd509e68"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -2200,7 +2189,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-wrpc-rust"
 version = "0.11.0"
-source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=032b10599a31b2290e18a4350cb19d83dd509e68#032b10599a31b2290e18a4350cb19d83dd509e68"
 dependencies = [
  "anyhow",
  "heck",
@@ -2213,7 +2202,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-wrpc-rust-macro"
 version = "0.11.0"
-source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=032b10599a31b2290e18a4350cb19d83dd509e68#032b10599a31b2290e18a4350cb19d83dd509e68"
 dependencies = [
  "anyhow",
  "prettyplease",
@@ -2239,26 +2228,8 @@ dependencies = [
  "serde_json",
  "wasm-encoder",
  "wasm-metadata",
- "wasmparser 0.251.0",
- "wit-parser 0.251.0",
-]
-
-[[package]]
-name = "wit-parser"
-version = "0.227.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddf445ed5157046e4baf56f9138c124a0824d4d1657e7204d71886ad8ce2fc11"
-dependencies = [
- "anyhow",
- "id-arena",
- "indexmap",
- "log",
- "semver",
- "serde",
- "serde_derive",
- "serde_json",
- "unicode-xid",
- "wasmparser 0.227.1",
+ "wasmparser",
+ "wit-parser",
 ]
 
 [[package]]
@@ -2277,7 +2248,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "unicode-xid",
- "wasmparser 0.251.0",
+ "wasmparser",
 ]
 
 [[package]]
@@ -2289,15 +2260,15 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 [[package]]
 name = "wrpc-introspect"
 version = "0.7.0"
-source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=032b10599a31b2290e18a4350cb19d83dd509e68#032b10599a31b2290e18a4350cb19d83dd509e68"
 dependencies = [
- "wit-parser 0.227.1",
+ "wit-parser",
 ]
 
 [[package]]
 name = "wrpc-transport"
 version = "0.29.0"
-source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=032b10599a31b2290e18a4350cb19d83dd509e68#032b10599a31b2290e18a4350cb19d83dd509e68"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2314,7 +2285,7 @@ dependencies = [
 [[package]]
 name = "wrpc-websockets"
 version = "0.1.0"
-source = "git+https://github.com/bytecodealliance/wrpc?rev=8f30fcda36e7a32960b6ee481d09b3427558494b#8f30fcda36e7a32960b6ee481d09b3427558494b"
+source = "git+https://github.com/bytecodealliance/wrpc?rev=032b10599a31b2290e18a4350cb19d83dd509e68#032b10599a31b2290e18a4350cb19d83dd509e68"
 dependencies = [
  "anyhow",
  "bytes",
