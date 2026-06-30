@@ -13,9 +13,18 @@
 //   worker -> page: { type: "ready" } | { type: "boot-error", error }
 //                   { type: "log", text }               // runtime tracing / panics
 //                   { id, ok: true, result } | { id, ok: false, error }
+//
+// UTXO *methods* are not invoked via a plain `call` op: the page invokes them
+// over wRPC (`{ op: "invoke", ... }`), handing this Worker a duplex stream pair
+// over which it serves the invocation (`serveInvocation`) — decoding the
+// wRPC-framed parameters, dispatching to the wasm `Contract::call`, and
+// encoding the results back. The `{ id, ok, error }` response (and any drained
+// events) still travels over `postMessage`, so the page learns whether the
+// guest ran to completion.
 
 import { instantiate, initSync } from "./pkg/starstream_run_web.js";
 import { setup } from "./fiber-env.js";
+import { serveInvocation, streamTransport } from "./wrpc.js";
 
 // A Worker has no `document`, so the runtime's on-page log bridge no-ops here;
 // forward what it writes to the console (tracing lines, panics) to the page,
@@ -37,6 +46,20 @@ const ops = {
   instantiate: ({ bytes }) => void (contract = instantiate(bytes)),
   describe: () => contract.describe(),
   call: ({ instance, func, args }) => contract.call(instance, func, args),
+  // Serve one wRPC method invocation over the transferred stream pair. The
+  // `self` receiver is omitted on the wire (as for a CLI-served UTXO), so the
+  // target handle rides in the message envelope and is re-injected here as the
+  // `{ $handle }` first argument the wasm `Contract::call` expects.
+  invoke: async ({ handle, instance, func, paramTypes, resultTypes, readable, writable }) =>
+    serveInvocation(
+      streamTransport({ readable, writable }),
+      paramTypes,
+      resultTypes,
+      async (jsonArgs) => {
+        const args = [{ $handle: handle }, ...jsonArgs];
+        return JSON.parse(await contract.call(instance, func, JSON.stringify(args)));
+      },
+    ),
   loadUtxo: ({ instance, storage }) => contract.loadUtxo(instance, storage),
   storageGet: ({ handle }) => contract.storageGet(handle),
   implementedMethods: ({ handle }) => contract.implementedMethods(handle),

@@ -1,137 +1,33 @@
-// A dependency-free wRPC-over-WebSocket client for the browser.
+// wRPC client/server helpers for the browser, built on the
+// `@bytecodealliance/wrpc` package (vendored under `./vendor/wrpc` by
+// `npm run build:wrpc`; see package.json).
 //
-// The `starstream-run` CLI's `--serve` mode mints a single UTXO and serves its
-// ABI methods over wRPC framed on WebSockets, alongside the rendered WIT served
-// over plain HTTP at `GET /`. This module lets the web UI act as that client:
-// it fetches and parses the served WIT, then invokes a method by opening a
-// WebSocket, encoding the parameters in the wRPC wire format and decoding the
-// results back.
+// The web UI invokes UTXO methods over wRPC in two configurations, differing
+// only in the byte transport:
 //
-// Wire protocol (see the wRPC `SPEC.md` and `wrpc-transport`'s framing):
-//   - One WebSocket connection per invocation (the framed transport maps a
-//     single stream to a single call).
-//   - The client writes, as binary frames: a `0x00` protocol byte, the
-//     `core:name`-encoded instance and function names, then a single root frame
-//     `[path-len=0][data-len][params]` whose data is the concatenated
-//     component-model encoding of the parameters (the `self` receiver is
-//     injected server-side, so it is omitted here).
-//   - The write side is then closed with an empty WebSocket *text* frame, the
-//     EOF sentinel `wrpc-websockets` uses.
-//   - The server replies with the concatenated encoding of the results in a
-//     root frame, then its own empty-text EOF.
+//   - A UTXO served by a `starstream-run` CLI (`--serve <ADDR>`) is invoked
+//     over a WebSocket (`webSocketTransport`): the CLI runs the guest and owns
+//     the UTXO, alongside the rendered WIT served over plain HTTP at `GET /`.
+//   - A UTXO instantiated in the browser is invoked over a duplex stream pair
+//     (`streamTransport`) handed to the contract's Web Worker (which runs the
+//     guest), so the page is the wRPC client and the Worker the wRPC server.
 //
-// Values are encoded/decoded with the same component-model value codec the CLI
-// uses (`crates/cli/src/codec.rs`): ints are LEB128 (except `s8`/`u8`/`bool`/
-// floats), strings are `core:name`, and so on.
+// Either way the invocation itself — the framing, the component-model value
+// codec, the multiplexed sub-streams — is handled by the package; this module
+// adapts the transports, parses the CLI-served WIT into the type trees the
+// codec walks, and bridges between the package's value representation (`jco`
+// conventions) and the JSON shape the page's widgets speak.
 
-// ----- byte writer / reader -------------------------------------------------
-
-class Writer {
-  constructor() {
-    this.bytes = [];
-  }
-  u8(b) {
-    this.bytes.push(b & 0xff);
-  }
-  raw(arr) {
-    for (const b of arr) this.bytes.push(b & 0xff);
-  }
-  // Unsigned LEB128 of a non-negative BigInt.
-  lebU(value) {
-    let v = BigInt(value);
-    if (v < 0n) throw new Error(`expected a non-negative integer, got ${v}`);
-    do {
-      let byte = Number(v & 0x7fn);
-      v >>= 7n;
-      if (v !== 0n) byte |= 0x80;
-      this.bytes.push(byte);
-    } while (v !== 0n);
-  }
-  // Signed LEB128 of a BigInt.
-  lebS(value) {
-    let v = BigInt(value);
-    for (;;) {
-      const byte = Number(v & 0x7fn);
-      v >>= 7n; // arithmetic shift (BigInt `>>` floors)
-      const signBit = byte & 0x40;
-      if ((v === 0n && !signBit) || (v === -1n && signBit)) {
-        this.bytes.push(byte);
-        return;
-      }
-      this.bytes.push(byte | 0x80);
-    }
-  }
-  // A `core:name`: a LEB128 length prefix followed by the UTF-8 bytes.
-  name(str) {
-    const utf8 = new TextEncoder().encode(str);
-    this.lebU(BigInt(utf8.length));
-    this.raw(utf8);
-  }
-  finish() {
-    return Uint8Array.from(this.bytes);
-  }
-}
-
-class Reader {
-  constructor(bytes) {
-    this.bytes = bytes;
-    this.pos = 0;
-  }
-  get done() {
-    return this.pos >= this.bytes.length;
-  }
-  u8() {
-    if (this.pos >= this.bytes.length) throw new Error("unexpected end of input");
-    return this.bytes[this.pos++];
-  }
-  take(n) {
-    if (this.pos + n > this.bytes.length) throw new Error("unexpected end of input");
-    const slice = this.bytes.subarray(this.pos, this.pos + n);
-    this.pos += n;
-    return slice;
-  }
-  lebU() {
-    let result = 0n;
-    let shift = 0n;
-    let byte;
-    do {
-      byte = this.u8();
-      result |= BigInt(byte & 0x7f) << shift;
-      shift += 7n;
-    } while (byte & 0x80);
-    return result;
-  }
-  lebS() {
-    let result = 0n;
-    let shift = 0n;
-    let byte;
-    do {
-      byte = this.u8();
-      result |= BigInt(byte & 0x7f) << shift;
-      shift += 7n;
-    } while (byte & 0x80);
-    if (byte & 0x40) result |= -1n << shift; // sign-extend
-    return result;
-  }
-  name() {
-    const len = Number(this.lebU());
-    return new TextDecoder().decode(this.take(len));
-  }
-}
-
-// A JS number large enough to lose precision is returned as a string instead,
-// so 64-bit values round-trip losslessly through `JSON.stringify`.
-function bigintToJson(v) {
-  return v >= -9007199254740991n && v <= 9007199254740991n ? Number(v) : v.toString();
-}
+import { invoke, accept, Chan } from "./vendor/wrpc/index.js";
 
 // ----- WIT type parser ------------------------------------------------------
 //
 // The CLI renders types with `wasm_wave`'s `DisplayType`, which spells every
 // type out structurally and inline (records as `record { a: u8 }`, variants as
 // `variant { off, on(u8) }`, …), so the served WIT text is self-contained. This
-// tokenizer + recursive-descent parser turns it back into a type tree the value
-// codec walks.
+// tokenizer + recursive-descent parser turns it back into the package's `Type`
+// tree (the in-browser path gets the same tree as JSON from the runtime, see
+// `type_to_json` in `crates/web/src/lib.rs`).
 
 const TYPE_TOKEN = /\s*(->|[A-Za-z][A-Za-z0-9-]*|[{}()<>,:;_/.@])/y;
 
@@ -184,13 +80,13 @@ class TokenStream {
   }
 }
 
-// Parse one type from the stream into a tree:
+// Parse one type from the stream into a package `Type` tree:
 //   { kind: "u64" } | { kind: "list", elem } | { kind: "option", some }
 //   | { kind: "result", ok, err } | { kind: "tuple", elems: [] }
 //   | { kind: "record", fields: [{name, ty}] }
 //   | { kind: "variant", cases: [{name, ty|null}] }
 //   | { kind: "enum", names: [] } | { kind: "flags", names: [] }
-//   | { kind: "resource", name }   (e.g. `utxo` / `borrow<utxo>`)
+//   | { kind: "own"|"borrow", name }   (e.g. `utxo` / `borrow<utxo>`)
 function parseType(ts) {
   const tok = ts.next();
   if (PRIMITIVES.has(tok)) return { kind: tok };
@@ -287,12 +183,12 @@ function parseType(ts) {
       ts.expect("<");
       const name = ts.next();
       ts.expect(">");
-      return { kind: "resource", name };
+      return { kind: "borrow", name };
     }
     default:
       // A bare identifier left over is an owned resource handle (the CLI spells
       // `own<utxo>` as just `utxo`).
-      return { kind: "resource", name: tok };
+      return { kind: "own", name: tok };
   }
 }
 
@@ -358,274 +254,188 @@ export function parseWit(text) {
   return { package: pkg, interface: iface, funcs };
 }
 
-// ----- value codec ----------------------------------------------------------
+// ----- value <-> JSON -------------------------------------------------------
 //
-// Encodes/decodes a single component-model value against a parsed type, in the
-// wRPC wire format. Mirrors `crates/cli/src/codec.rs`.
+// The package decodes values per the component-model JS (`jco`) conventions
+// (`bigint` for 64-bit ints, `{ tag, val }` for variants/results, `undefined`
+// for `option` none, …). The page's widgets and the runtime's `val_to_json`
+// (`crates/web/src/lib.rs`) instead speak a plain-JSON shape. `valueToJson`
+// lowers a decoded value into that shape; arguments need no conversion the
+// other way, since the package's encoder already accepts the page's JSON
+// (numbers for ints, `null` for `option` none, arrays for `flags`).
 
-function encodeValue(w, ty, v) {
-  switch (ty.kind) {
-    case "bool":
-      w.u8(v ? 1 : 0);
-      return;
-    case "u8":
-      w.u8(Number(v) & 0xff);
-      return;
-    case "s8":
-      w.u8(Number(v) & 0xff);
-      return;
-    case "u16": case "u32": case "u64":
-      w.lebU(BigInt(v));
-      return;
-    case "s16": case "s32": case "s64":
-      w.lebS(BigInt(v));
-      return;
-    case "f32": {
-      const buf = new ArrayBuffer(4);
-      new DataView(buf).setFloat32(0, Number(v), true);
-      w.raw(new Uint8Array(buf));
-      return;
-    }
-    case "f64": {
-      const buf = new ArrayBuffer(8);
-      new DataView(buf).setFloat64(0, Number(v), true);
-      w.raw(new Uint8Array(buf));
-      return;
-    }
-    case "char": {
-      const utf8 = new TextEncoder().encode(String(v));
-      w.raw(utf8);
-      return;
-    }
-    case "string":
-      w.name(String(v));
-      return;
-    case "list": {
-      if (!Array.isArray(v)) throw new Error("expected an array for list");
-      w.lebU(BigInt(v.length));
-      for (const x of v) encodeValue(w, ty.elem, x);
-      return;
-    }
-    case "tuple": {
-      if (!Array.isArray(v) || v.length !== ty.elems.length) {
-        throw new Error(`expected a ${ty.elems.length}-tuple`);
-      }
-      ty.elems.forEach((et, i) => encodeValue(w, et, v[i]));
-      return;
-    }
-    case "record": {
-      if (typeof v !== "object" || v === null) throw new Error("expected an object for record");
-      for (const { name, ty: fty } of ty.fields) {
-        if (!(name in v)) throw new Error(`missing record field \`${name}\``);
-        encodeValue(w, fty, v[name]);
-      }
-      return;
-    }
-    case "option": {
-      if (v === null || v === undefined) {
-        w.u8(0);
-      } else {
-        w.u8(1);
-        encodeValue(w, ty.some, v);
-      }
-      return;
-    }
-    case "result": {
-      if (typeof v !== "object" || v === null || (!("ok" in v) === !("err" in v))) {
-        throw new Error("expected `{ ok }` or `{ err }` for result");
-      }
-      if ("ok" in v) {
-        w.u8(0);
-        if (ty.ok) encodeValue(w, ty.ok, v.ok);
-      } else {
-        w.u8(1);
-        if (ty.err) encodeValue(w, ty.err, v.err);
-      }
-      return;
-    }
-    case "enum": {
-      const i = ty.names.indexOf(String(v));
-      if (i < 0) throw new Error(`unknown enum case \`${v}\``);
-      w.lebU(BigInt(i));
-      return;
-    }
-    case "variant": {
-      // Accepts `"case"` for payload-less cases or `{ "case": value }`.
-      let name, payload;
-      if (typeof v === "string") {
-        name = v;
-        payload = undefined;
-      } else if (v && typeof v === "object") {
-        name = Object.keys(v)[0];
-        payload = v[name];
-      } else {
-        throw new Error("expected a string or single-key object for variant");
-      }
-      const i = ty.cases.findIndex((c) => c.name === name);
-      if (i < 0) throw new Error(`unknown variant case \`${name}\``);
-      w.lebU(BigInt(i));
-      if (ty.cases[i].ty) encodeValue(w, ty.cases[i].ty, payload);
-      return;
-    }
-    case "flags": {
-      const set = new Set(Array.isArray(v) ? v : []);
-      const bytes = new Uint8Array(Math.ceil(Math.max(ty.names.length, 1) / 8));
-      ty.names.forEach((name, i) => {
-        if (set.has(name)) bytes[i >> 3] |= 1 << (i & 7);
-      });
-      w.raw(bytes);
-      return;
-    }
-    default:
-      throw new Error(`encoding \`${ty.kind}\` is not supported`);
-  }
+// A JS number large enough to lose precision is returned as a string instead,
+// so 64-bit values round-trip losslessly through `JSON.stringify`.
+function bigintToJson(v) {
+  return v >= -9007199254740991n && v <= 9007199254740991n ? Number(v) : v.toString();
 }
 
-function decodeValue(r, ty) {
+export function valueToJson(ty, v) {
   switch (ty.kind) {
-    case "bool":
-      return r.u8() !== 0;
-    case "u8":
-      return r.u8();
-    case "s8": {
-      const b = r.u8();
-      return b >= 0x80 ? b - 0x100 : b;
-    }
-    case "u16": case "u32": case "u64":
-      return bigintToJson(r.lebU());
-    case "s16": case "s32": case "s64":
-      return bigintToJson(r.lebS());
-    case "f32":
-      return new DataView(r.take(4).slice().buffer).getFloat32(0, true);
-    case "f64":
-      return new DataView(r.take(8).slice().buffer).getFloat64(0, true);
-    case "char": {
-      // Read one UTF-8 scalar value: peek the lead byte to learn its length.
-      const lead = r.bytes[r.pos];
-      const len = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
-      return new TextDecoder().decode(r.take(len));
-    }
-    case "string":
-      return r.name();
-    case "list": {
-      const n = Number(r.lebU());
-      const out = [];
-      for (let i = 0; i < n; i++) out.push(decodeValue(r, ty.elem));
-      return out;
-    }
+    case "u64":
+    case "s64":
+      return bigintToJson(v);
+    case "list":
+      // `list<u8>` decodes to a `Uint8Array`; render it as a number array.
+      return ty.elem.kind === "u8" ? Array.from(v) : v.map((x) => valueToJson(ty.elem, x));
     case "tuple":
-      return ty.elems.map((et) => decodeValue(r, et));
+      return ty.elems.map((et, i) => valueToJson(et, v[i]));
     case "record": {
       const out = {};
-      for (const { name, ty: fty } of ty.fields) out[name] = decodeValue(r, fty);
+      for (const { name, ty: fty } of ty.fields) out[name] = valueToJson(fty, v[name]);
       return out;
     }
     case "option":
-      return r.u8() !== 0 ? decodeValue(r, ty.some) : null;
-    case "result": {
-      const isErr = r.u8() !== 0;
-      if (isErr) return { err: ty.err ? decodeValue(r, ty.err) : null };
-      return { ok: ty.ok ? decodeValue(r, ty.ok) : null };
-    }
-    case "enum": {
-      const i = Number(r.lebU());
-      return ty.names[i] ?? `enum#${i}`;
-    }
+      return v === undefined || v === null ? null : valueToJson(ty.some, v);
+    case "result":
+      return v.tag === "ok"
+        ? { ok: ty.ok ? valueToJson(ty.ok, v.val) : null }
+        : { err: ty.err ? valueToJson(ty.err, v.val) : null };
     case "variant": {
-      const i = Number(r.lebU());
-      const c = ty.cases[i];
-      if (!c) return `variant#${i}`;
-      return c.ty ? { [c.name]: decodeValue(r, c.ty) } : c.name;
+      const c = ty.cases.find((c) => c.name === v.tag);
+      return c && c.ty ? { [v.tag]: valueToJson(c.ty, v.val) } : v.tag;
     }
-    case "flags": {
-      const bytes = r.take(Math.ceil(Math.max(ty.names.length, 1) / 8));
-      return ty.names.filter((_, i) => bytes[i >> 3] & (1 << (i & 7)));
-    }
-    case "resource":
+    case "flags":
+      return ty.names.filter((name) => v[name]);
+    case "own":
+    case "borrow":
       return { $resource: true };
     default:
-      throw new Error(`decoding \`${ty.kind}\` is not supported`);
+      // bool, u8..u32 / s8..s32 (number), f32/f64 (number), char, string,
+      // enum (the case name) all pass through unchanged.
+      return v;
   }
 }
 
-// ----- invocation -----------------------------------------------------------
+// ----- transports -----------------------------------------------------------
+//
+// A wRPC `Transport` is a duplex of `Uint8Array` chunks: `read()` (a chunk, or
+// `null` at EOF), `write(bytes)`, and `closeWrite()` (half-close). Each adapter
+// below also exposes a `closed` promise that resolves once the peer half-closes
+// its write side — `invoke` resolves its synchronous results without waiting
+// for that EOF (a result-less call has none to read), so callers await `closed`
+// to know the server actually ran to completion.
 
-const PROTOCOL = 0x00;
-
-// Build the bytes the client writes on the invocation's root channel: the
-// protocol byte, the instance and function names, and the params root frame.
-function encodeInvocation(instance, func, paramTypes, args) {
-  const params = new Writer();
-  paramTypes.forEach((ty, i) => encodeValue(params, ty, args[i]));
-  const paramBytes = params.finish();
-
-  const w = new Writer();
-  w.u8(PROTOCOL);
-  w.name(instance);
-  w.name(func);
-  w.u8(0); // root frame path length
-  w.lebU(BigInt(paramBytes.length)); // root frame data length
-  w.raw(paramBytes);
-  return w.finish();
-}
-
-// Open a fresh WebSocket, send the invocation, and resolve with the raw bytes
-// the server sends back on the root channel (its results frame data). Rejects
-// on a socket error or if the connection closes before the EOF sentinel.
-function invokeRaw(wsUrl, payload) {
-  return new Promise((resolve, reject) => {
-    let ws;
-    try {
-      ws = new WebSocket(wsUrl);
-    } catch (err) {
-      reject(err);
-      return;
-    }
-    ws.binaryType = "arraybuffer";
-    const chunks = [];
-    let settled = false;
-
-    ws.onopen = () => {
-      ws.send(payload);
-      ws.send(""); // empty text frame: the wRPC write-side EOF sentinel
-    };
-    ws.onmessage = ({ data }) => {
-      if (typeof data === "string") {
-        // The server's empty-text EOF sentinel: the response is complete.
-        settled = true;
-        let total = 0;
-        for (const c of chunks) total += c.length;
-        const buf = new Uint8Array(total);
-        let off = 0;
-        for (const c of chunks) {
-          buf.set(c, off);
-          off += c.length;
-        }
-        resolve(buf);
-        ws.close();
-      } else {
-        chunks.push(new Uint8Array(data));
+// Adapt a WHATWG duplex (a pair of `{ readable, writable }` streams, as built
+// from two `TransformStream`s and shared with a Worker) to a transport.
+export function streamTransport({ readable, writable }) {
+  const reader = readable.getReader();
+  const writer = writable.getWriter();
+  let onClosed;
+  const closed = new Promise((resolve) => (onClosed = resolve));
+  return {
+    closed,
+    async read() {
+      const { value, done } = await reader.read();
+      if (done) {
+        onClosed();
+        return null;
       }
-    };
-    ws.onerror = () => {
-      if (!settled) reject(new Error(`WebSocket error connecting to ${wsUrl}`));
-    };
-    ws.onclose = () => {
-      if (!settled) reject(new Error("WebSocket closed before the EOF sentinel"));
-    };
-  });
+      return value;
+    },
+    write: (bytes) => writer.write(bytes),
+    closeWrite: () => writer.close(),
+    async close() {
+      onClosed();
+      try {
+        await reader.cancel();
+      } catch {}
+      try {
+        await writer.abort();
+      } catch {}
+    },
+  };
 }
 
-// Decode the server's root-frame bytes into the result values. The frame is
-// `[path-len=0][data-len][data]`; `data` is the concatenated results.
-function decodeResults(bytes, resultTypes) {
-  if (bytes.length === 0) return []; // no results frame written (empty results)
-  const frame = new Reader(bytes);
-  const pathLen = Number(frame.lebU());
-  if (pathLen !== 0) throw new Error(`unexpected result frame path length ${pathLen}`);
-  const dataLen = Number(frame.lebU());
-  const data = new Reader(frame.take(dataLen));
-  return resultTypes.map((ty) => decodeValue(data, ty));
+// Adapt a WebSocket carrying the `wrpc-websockets` framing — binary frames are
+// data, an empty *text* frame is the write-side EOF sentinel — to a transport.
+export function webSocketTransport(url) {
+  const ws = new WebSocket(url);
+  ws.binaryType = "arraybuffer";
+  const inbound = new Chan();
+  let onClosed;
+  const closed = new Promise((resolve) => (onClosed = resolve));
+  let opened;
+  let failed;
+  const ready = new Promise((resolve, reject) => {
+    opened = resolve;
+    failed = reject;
+  });
+  let settled = false;
+  const finish = (err) => {
+    if (settled) return;
+    settled = true;
+    inbound.close(err);
+    onClosed();
+  };
+  ws.onopen = () => opened();
+  ws.onmessage = ({ data }) => {
+    // An empty text frame is the server's EOF sentinel; binary frames are data.
+    if (typeof data === "string") finish();
+    else inbound.push(new Uint8Array(data));
+  };
+  ws.onerror = () => {
+    const err = new Error(`WebSocket error connecting to ${url}`);
+    failed(err);
+    finish(err);
+  };
+  ws.onclose = () => finish();
+  return {
+    closed,
+    async read() {
+      const { value, done } = await inbound.next();
+      return done ? null : value;
+    },
+    async write(bytes) {
+      await ready;
+      ws.send(bytes);
+    },
+    async closeWrite() {
+      await ready;
+      ws.send(""); // empty text frame: the wRPC write-side EOF sentinel
+    },
+    close() {
+      try {
+        ws.close();
+      } catch {}
+    },
+  };
+}
+
+// ----- invocation helpers ---------------------------------------------------
+
+// Invoke `func` on `instance` over `transport`, encoding `args` (a JSON array)
+// against `paramTypes` and lowering the decoded results to the page's JSON
+// shape. Waits for the server's EOF so a result-less call still blocks until
+// the guest has run, then tears the transport down. Returns a JSON string.
+export async function callOverTransport(transport, instance, func, paramTypes, resultTypes, args) {
+  try {
+    const { results, done } = await invoke(transport, instance, func, paramTypes, args, resultTypes);
+    await done;
+    await transport.closed;
+    return JSON.stringify(resultTypes.map((ty, i) => valueToJson(ty, results[i])));
+  } finally {
+    transport.close?.();
+  }
+}
+
+// Serve a single invocation on `transport`: accept it, decode the parameters,
+// hand them to `bridge` as a JSON array, and send back the JSON results it
+// returns. The write side is always closed, so a `bridge` that throws still
+// lets the client's read reach EOF (and the caller report the failure).
+export async function serveInvocation(transport, paramTypes, resultTypes, bridge) {
+  try {
+    const inv = await accept(transport);
+    const { params, done } = await inv.receiveParams(paramTypes);
+    await done;
+    const jsonArgs = paramTypes.map((ty, i) => valueToJson(ty, params[i]));
+    const results = await bridge(jsonArgs);
+    await inv.sendResults(resultTypes, results);
+  } finally {
+    try {
+      await transport.closeWrite();
+    } catch {}
+  }
 }
 
 // ----- remote contract ------------------------------------------------------
@@ -684,7 +494,8 @@ export class RemoteContract {
     const methods = this.parsed.funcs.map((func) => ({
       export: func.name,
       label: func.name,
-      params: func.params.map((p) => ({ name: p.name, kind: kindOf(p.ty) })),
+      params: func.params.map((p) => ({ name: p.name, kind: kindOf(p.ty), ty: p.ty })),
+      results: func.results,
     }));
     return JSON.stringify({
       instances: [
@@ -718,9 +529,14 @@ export class RemoteContract {
     if (args.length !== sig.params.length) {
       throw new Error(`expected ${sig.params.length} argument(s), got ${args.length}`);
     }
-    const payload = encodeInvocation(instance, func, sig.params, args);
-    const bytes = await invokeRaw(this.endpoints.ws, payload);
-    return JSON.stringify(decodeResults(bytes, sig.results));
+    return callOverTransport(
+      webSocketTransport(this.endpoints.ws),
+      instance,
+      func,
+      sig.params,
+      sig.results,
+      args,
+    );
   }
 }
 

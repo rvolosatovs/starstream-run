@@ -452,7 +452,7 @@
     </main>
 
     <script type="module">
-      import { RemoteContract } from "./wrpc.js";
+      import { RemoteContract, streamTransport, callOverTransport } from "./wrpc.js";
 
       // The runtime (~11 MB) is compiled once on the main thread and the
       // resulting WebAssembly.Module is structured-cloned to every Worker, so
@@ -524,8 +524,74 @@
         }
 
         instantiate(bytes) { return this.#rpc("instantiate", { bytes }); }
-        describe() { return this.#rpc("describe"); }
-        call(instance, func, args) { return this.#rpc("call", { instance, func, args }); }
+
+        // Cache each method's wRPC type signature (param + result type trees)
+        // off the describe so `call` can invoke methods over wRPC.
+        async describe() {
+          const json = await this.#rpc("describe");
+          const api = JSON.parse(json);
+          this.sigs = new Map();
+          for (const inst of api.instances ?? []) {
+            for (const m of inst.methods ?? []) {
+              this.sigs.set(`${inst.name} ${m.export}`, {
+                params: (m.params ?? []).map((p) => p.ty),
+                results: m.results ?? [],
+              });
+            }
+          }
+          return json;
+        }
+
+        // A `[method]` call is invoked over wRPC: a duplex stream pair is handed
+        // to the Worker (which serves it against the wasm guest) and the page
+        // drives the wRPC client over its end. The `self` `{ $handle }` is split
+        // out of the args and travels in the envelope (the receiver is injected
+        // Worker-side). Constructors and other ops still use the plain RPC path.
+        call(instance, func, args) {
+          const sig = func.startsWith("[method]") && this.sigs?.get(`${instance} ${func}`);
+          if (!sig) return this.#rpc("call", { instance, func, args });
+
+          let parsed = JSON.parse(args);
+          let handle;
+          if (parsed.length && parsed[0] && typeof parsed[0] === "object" && "$handle" in parsed[0]) {
+            handle = parsed[0].$handle;
+            parsed = parsed.slice(1);
+          }
+          const c2s = new TransformStream(); // page -> worker
+          const s2c = new TransformStream(); // worker -> page
+          const transport = streamTransport({ readable: s2c.readable, writable: c2s.writable });
+
+          const id = this.nextId++;
+          const done = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+          this.worker.postMessage(
+            {
+              id,
+              op: "invoke",
+              handle,
+              instance,
+              func,
+              paramTypes: sig.params,
+              resultTypes: sig.results,
+              readable: c2s.readable,
+              writable: s2c.writable,
+            },
+            [c2s.readable, s2c.writable],
+          );
+
+          // The results come back over the stream; the `{ id, ok, error }`
+          // response (awaited via `done`) is authoritative on success/failure
+          // and carries any drained events.
+          return (async () => {
+            let results = "[]";
+            try {
+              results = await callOverTransport(transport, instance, func, sig.params, sig.results, parsed);
+            } catch {
+              // A stream-level failure surfaces as the Worker's error response.
+            }
+            await done;
+            return results;
+          })();
+        }
         loadUtxo(instance, storage) { return this.#rpc("loadUtxo", { instance, storage }); }
         storageGet(handle) { return this.#rpc("storageGet", { handle }); }
         implementedMethods(handle) { return this.#rpc("implementedMethods", { handle }); }
